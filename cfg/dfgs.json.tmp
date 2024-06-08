@@ -1,0 +1,14 @@
+[
+    {
+        "id": "10346290-3ada-10ea-1a26-02120c220001",
+        "desc": "RAG LLM DFG",
+        "graph": [
+            {
+                "pathname": "/rag/ebd/centroids",
+                "shard_dispatcher_list": ["one"],
+                "user_defined_logic_list": ["11a2c123-1100-21ac-1755-0001ac110000"],
+                "destinations": [{"/rag/edb/clusters":"put"}]
+            }
+        ]
+    }
+]
