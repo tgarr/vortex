@@ -10,15 +10,21 @@ find_package(derecho CONFIG REQUIRED)
 find_package(cascade CONFIG REQUIRED)
 
 
+# Find Faiss package
+find_package(Faiss REQUIRED)
+# Find CUDA Toolkit if using Faiss with GPU support
+find_package(CUDAToolkit REQUIRED)
+
 add_library(centroids_search_udl SHARED centroids_search_udl.cpp)
 target_include_directories(centroids_search_udl PRIVATE
+    ${FAISS_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
 
-target_link_libraries(centroids_search_udl derecho::cascade)
+target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
 add_custom_command(TARGET centroids_search_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
