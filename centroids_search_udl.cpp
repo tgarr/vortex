@@ -26,9 +26,33 @@ std::string get_description() {
 
 class CentroidsSearchOCDPO: public OffCriticalDataPathObserver {
 
+    /*** TODO: change this.
+     * place holder for now to store the centroids embeddings in memory cache
+     * Maybe instead of map, array of array would be a better data structure for this.
+    ***/
+    static std::unordered_map<std::string, uint32_t> centroids;
+    static bool is_centroids_cached = false;
+
+    /***
+     * Fill in the memory cache by getting the centroids embeddings from KV store in Cascade
+     * This function is called when this UDL is first triggered by caller to operator(),
+     * the embeddings for all centroids are used to compute centroids search and find the closest clusters.
+     * it sacrifices the first request to this node, but the following requests will benefit from this cache.
+     * The embeddings for centroids are stored as KV objects in Cascade.
+     * In static RAG setting, this function should be called only once at the begining.
+     * In dynamic RAG setting, this function could be extended to call periodically or upon notification. 
+     * (The reason not to call it at initialization, is that initialization is called upon server starts, 
+     *  but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
+    ***/
+    static void fill_in_cached_centroids(){
+        /*** TODO: implement this! ***/
+        return;
+    }
+
     /***
     * Function copied from FAISS repository example: 
     * https://github.com/facebookresearch/faiss/blob/main/tutorial/cpp/4-GPU.cpp
+    * TODO: update this to our needed implementation and data type
     ***/
     static int faiss_gpu_search(){
         int d = 64;      // dimension
