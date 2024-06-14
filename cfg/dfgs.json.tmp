@@ -4,7 +4,7 @@
         "desc": "RAG LLM DFG",
         "graph": [
             {
-                "pathname": "/rag/ebd/centroids",
+                "pathname": "/rag/ebd/centroids_search",
                 "shard_dispatcher_list": ["one"],
                 "user_defined_logic_list": ["11a2c123-1100-21ac-1755-0001ac110000"],
                 "destinations": [{"/rag/edb/clusters":"put"}]
