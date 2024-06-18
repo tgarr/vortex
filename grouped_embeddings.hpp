@@ -165,8 +165,8 @@ public:
                delete[] D;
           }
 
-          delete[] xb;
-          delete[] xq;
+          // delete[] xb;
+          // delete[] xq;
 
           return 0;
 
@@ -263,8 +263,8 @@ public:
                delete[] D;
           }
 
-          delete[] xb;
-          delete[] xq;
+          // delete[] xb;
+          // delete[] xq;
 
           return 0;
      }
