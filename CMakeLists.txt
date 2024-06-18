@@ -24,7 +24,18 @@ target_include_directories(centroids_search_udl PRIVATE
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
 
+add_library(clusters_search_udl SHARED clusters_search_udl.cpp)
+target_include_directories(clusters_search_udl PRIVATE
+    ${FAISS_INCLUDE_DIRS}
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+)
+
 target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
+target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
+
 add_custom_command(TARGET centroids_search_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
