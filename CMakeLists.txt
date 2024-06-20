@@ -6,23 +6,36 @@ project(rag_demo CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(spdlog 1.3.1 REQUIRED)
 find_package(derecho CONFIG REQUIRED)
 find_package(cascade CONFIG REQUIRED)
-
 
 # Find Faiss package
 find_package(Faiss REQUIRED)
 # Find CUDA Toolkit if using Faiss with GPU support
 find_package(CUDAToolkit REQUIRED)
 
-add_library(centroids_search_udl SHARED centroids_search_udl.cpp)
-target_include_directories(centroids_search_udl PRIVATE
-    ${FAISS_INCLUDE_DIRS}
+
+include(GNUInstallDirs)
+if (NOT DEFINED CMAKE_INSTALL_BINDIR)
+    set(CMAKE_INSTALL_BINDIR bin)
+endif()
+
+if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
+    set(CMAKE_INSTALL_LIBDIR lib)
+endif()
+
+# main target
+add_library(python_udl SHARED python_udl.cpp)
+target_include_directories(python_udl PRIVATE
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
+target_link_libraries(python_udl cascade Python3::Python Python3::NumPy)
 
 add_library(clusters_search_udl SHARED clusters_search_udl.cpp)
 target_include_directories(clusters_search_udl PRIVATE
@@ -73,6 +86,20 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/setup.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup.py
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/python_udls
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/python_udls
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/python_udls
+    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/python_udls
+    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/python_udls
+    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n5/python_udls
+    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n6/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
@@ -85,6 +112,8 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/clear_log.sh 
+    COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
+    COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cfg/run.sh.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/clear_log.sh.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/layout.json.tmp
@@ -93,3 +122,47 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
     COMMENT "prepare centroids search configuration"
 )
+
+
+
+# make install
+install(TARGETS python_udl EXPORT cascade_python_udlTargets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfigVersion.cmake"
+    VERSION ${python_udl_VERSION}
+    COMPATIBILITY AnyNewerVersion
+)
+
+export (EXPORT cascade_python_udlTargets
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlTargets.cmake"
+)
+
+set(ConfigPackageLocation ${CMAKE_INSTALL_LIBDIR}/cmake/cascade_python_udl)
+
+configure_package_config_file(cascade_python_udlConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfig.cmake"
+    INSTALL_DESTINATION ${ConfigPackageLocation}
+    PATH_VARS CMAKE_INSTALL_LIBDIR ConfigPackageLocation
+)
+
+install(EXPORT cascade_python_udlTargets
+    FILE cascade_python_udlTargets.cmake
+    NAMESPACE derecho::
+    DESTINATION ${ConfigPackageLocation}
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfigVersion.cmake"
+    DESTINATION ${ConfigPackageLocation}
+)
+
+set(INSTALLED_PYTHON_UDL_LIB_FILE "${CMAKE_INSTALL_LIBDIR}/$<TARGET_FILE_NAME:python_udl>")
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/show_cascade_python_udl.sh"
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
