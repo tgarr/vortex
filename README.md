@@ -6,6 +6,11 @@
    NVIDIA toolkit nvcc if run with GPU support
 2. cascade : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223
 3. cascade Python API : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223/src/service/python
+4. model dependencies:
+
+BGE-M3: https://github.com/FlagOpen/FlagEmbedding 
+
+Generator model
 
 ## Branches
 We implemented two pipeline for RAG. 
