@@ -23,6 +23,22 @@ class EncodeCentSearchUDL(UserDefinedLogic):
           Constructor
           '''
           model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False)
+     
+
+     def load_centroids_embeddings(self):
+          '''
+          Load the centroids embeddings
+          Fill in the memory cache by getting the centroids embeddings from KV store in Cascade
+          This function is called when this UDL is first triggered by caller to operator(),
+          the embeddings for all centroids are used to compute centroids search and find the closest clusters.
+          it sacrifices the first request to this node, but the following requests will benefit from this cache.
+          The embeddings for centroids are stored as KV objects in Cascade.
+          In static RAG setting, this function should be called only once at the begining.
+          In dynamic RAG setting, this function could be extended to call periodically or upon notification. 
+          (The reason not to call it at initialization, is that initialization is called upon server starts, 
+          but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
+          '''
+          pass
 
 
 
