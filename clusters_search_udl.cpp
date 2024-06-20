@@ -67,16 +67,17 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         if (!is_clusters_embs_cached) {
             fill_in_cached_clusters_embs();
         }
-        // 1. compute knn for all the clusters on this node
-        for (auto& cluster: this->clusters_embs) {
-            // 1.1. get the embeddings of the cluster
-            auto& embs = cluster.second;
-            // 1.2. search the top K embeddings that are close to the query
-            int nq = 10000;
-            float* xq = new float[this->emb_dim * nq]; // Placeholder query embeddings
-            embs->faiss_gpu_search(nq, xq);
-            // 1.3. send the top K embeddings to the next stage
-        }
+        // 1. compute knn for the corresponding cluster on this node
+        // 1.0. get the cluster ID
+        uint32_t cluster_id = 0; // TODO: get the cluster ID from the object
+        // 1.1. get the embeddings of the cluster
+        auto& embs = clusters_embs[cluster_id];
+        // 1.2. search the top K embeddings that are close to the query
+        int nq = 10000;
+        float* xq = new float[this->emb_dim * nq]; // Placeholder query embeddings
+        embs->faiss_gpu_search(nq, xq);
+        // 1.3. send the top K embeddings to the next stage
+        
         // 2. emit the result to the subsequent UDL
         // Blob blob(object.blob);
         // emit(key_string, EMIT_NO_VERSION_AND_TIMESTAMP , blob);

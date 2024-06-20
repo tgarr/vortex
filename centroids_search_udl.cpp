@@ -19,7 +19,6 @@ std::string get_description() {
 
 class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
-   
     // embeddings of centroids, assume that the embeddings are in order of the centroids from 0 to last_centroid_id
     std::unique_ptr<GroupedEmbeddings> centroid_embs;
     bool is_centroids_cached = false;
@@ -65,11 +64,14 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             if (!this->is_centroids_cached) {
                 fill_in_cached_centroids();
             }
-            // 1. compute knn
+            // 1. get the query embeddings from the object by running encoder ML
+            // 2. compute knn
             int nq = 10000;
             float* xq = new float[this->emb_dim * nq]; // Placeholder query embeddings
             this->centroid_embs->faiss_gpu_search(nq, xq);
-            // 2. emit the result to the subsequent UDL
+            // 3. emit to the subsequent UDL by sending the result to shard according to cluster_id
+            // 3.1 get the cluster_id from faiss_search result
+            // 3.2 emit the result to the shard
             Blob blob(object.blob);
             emit(key_string, EMIT_NO_VERSION_AND_TIMESTAMP , blob);
     }
