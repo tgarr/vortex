@@ -54,6 +54,31 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         return;
     }
 
+    /***
+     * Get the cluster ID from the object's key_string
+     * This function is called when the object is received from the sender
+     * The cluster ID is used to get the embeddings of the corresponding cluster
+     * @param key_string the key string of the object
+     * @return the cluster ID, -1 if not found
+    ***/
+    inline int get_cluster_id(const std::string& key_string) {
+        size_t pos = str.find("cluster");
+        if (pos == std::string::npos) {
+            return -1;
+        }
+        pos += 7; 
+        // Extract the number following "cluster"
+        std::string numberStr;
+        while (pos < str.size() && std::isdigit(str[pos])) {
+            numberStr += str[pos];
+            ++pos;
+        }
+        if (!numberStr.empty()) {
+            return std::stoi(numberStr);
+        }
+        return -1;
+    }
+
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
                                const std::string& key_string,
@@ -69,7 +94,12 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         }
         // 1. compute knn for the corresponding cluster on this node
         // 1.0. get the cluster ID
-        uint32_t cluster_id = 0; // TODO: get the cluster ID from the object
+        uint32_t cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
+        if (cluster_id == -1) {
+            std::cerr << "Error: cluster ID not found in the key_string" << std::endl;
+            dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
+            return;
+        }
         // 1.1. get the embeddings of the cluster
         auto& embs = clusters_embs[cluster_id];
         // 1.2. search the top K embeddings that are close to the query
