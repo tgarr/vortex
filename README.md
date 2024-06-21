@@ -41,6 +41,7 @@ Image name: yy354/rag_dev:v1.0
 
 
 # Additional Note
-python_udl.cpp and its corresponding CMakeLists contents are copied from Weijia's code in repo: 
+python_udl.cpp and its corresponding CMake contents (in CMakeLists.txt, config.h.in, cascade_python_udlConfig.cmake.in) are copied from Weijia's code in Cascade repo: 
+https://github.com/Derecho-Project/cascade/tree/master/src/udl_zoo/python
 
-https://github.com/Derecho-Project/cascade-demos
+Copied them here to make the build process smooth, without the need to use pathname in udl_dll.cfg to direct to where udl_zoo/python built located.
