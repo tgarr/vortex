@@ -12,9 +12,6 @@ group2id = {
 }
 
 log_file = None
-def write_log(log):
-    assert(log_file is not None)
-    log_file.write(log+'\n')
 
 
 def download_msmarco(version='v1.1'):
@@ -22,11 +19,6 @@ def download_msmarco(version='v1.1'):
     return ds
 
 
-def embed(passage_list, model):
-    passage_embeddings = model.encode(
-        passage_list, return_dense=True, return_sparse=False, return_colbert_vecs=False
-    )
-    return passage_embeddings
 
 
 def load_pickle(name):
@@ -35,9 +27,6 @@ def load_pickle(name):
     return loaded_data
 
 
-def store_pickle(data, name):
-    with open(name, 'wb') as file:
-        pickle.dump(data, file)
 
 
 def main():
@@ -46,7 +35,6 @@ def main():
     t1 = time.time()
     model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False)
     t2 = time.time()
-    write_log(f'Model loading time: {t2 - t1}')
     chunk_len = 17004
     total_len = 102023
     dimension = 1024
@@ -70,12 +58,7 @@ def main():
                 q_count = 0
     d_count_list.append(d_count)
     q_count_list.append(q_count)
-    write_log("Finish counting passages.")
-    write_log(f"q_count: {q_count_list}")
-    write_log(f"d_count: {d_count_list}")
-    write_log(f"total_count: {total_count}")
-    assert(sum(q_count_list) == total_len)
-    assert(sum(d_count_list) == 837729)
+
     
     total_processed = 0
     q_count = 0
@@ -99,7 +82,8 @@ def main():
                 [p for p in data['passages']['passage_text']] +\
                 [data['query']]
             passage_count = len(data['passages']['passage_text'])
-            ebd = embed(passage_list, model)['dense_vecs']
+            ebd = np.ones((passage_count+2, 1024), dtype=np.float32)
+            # ebd = embed(passage_list, model)['dense_vecs']
             # Put the passages' embedding in the doc embedding list.
             try:
                 doc_ebd_list[doc_pos : doc_pos + passage_count] = \
@@ -113,13 +97,12 @@ def main():
             q_count += 1
             if total_processed % 1000 == 0:
                 print(f"Finish {total_processed}/102023", flush=True)
-
             if q_count % chunk_len == 0 or total_processed == total_count:
                 t2 = time.time()
-                write_log(f'Doc embedding Chunk {iteration} time: {t2 - t1}')
+                #write_log(f'Doc embedding Chunk {iteration} time: {t2 - t1}')
 
-                store_pickle(doc_ebd_list, f"ebd_doc_{iteration}.pickle")
-                store_pickle(query_ebd_list, f"ebd_query_{iteration}.pickle")
+                #store_pickle(doc_ebd_list, f"ebd_doc_{iteration}.pickle")
+                #store_pickle(query_ebd_list, f"ebd_query_{iteration}.pickle")
                 iteration += 1
                 if iteration != 6:
                     q_count = 0
