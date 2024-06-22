@@ -27,15 +27,19 @@ if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
     set(CMAKE_INSTALL_LIBDIR lib)
 endif()
 
-# main target
+set(python_udl_VERSION 1.0)
+
+find_package(Python3 3.10.0 QUIET COMPONENTS Interpreter Development Development.Module Development.Embed NumPy)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 add_library(python_udl SHARED python_udl.cpp)
 target_include_directories(python_udl PRIVATE
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
 )
 target_link_libraries(python_udl cascade Python3::Python Python3::NumPy)
+
 
 add_library(clusters_search_udl SHARED clusters_search_udl.cpp)
 target_include_directories(clusters_search_udl PRIVATE
@@ -45,16 +49,40 @@ target_include_directories(clusters_search_udl PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
-
-target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
 target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
+
+# Created for Python numpy C++ processing testing
+# add_library(test_py_udl SHARED test_py_udl.cpp)
+# target_include_directories(test_py_udl PRIVATE
+#     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+#     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+#     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+#     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+# )
+# target_link_libraries(test_py_udl PRIVATE derecho::cascade)
+
+
+add_library(centroids_search_udl SHARED centroids_search_udl.cpp)
+target_include_directories(centroids_search_udl PRIVATE
+    ${FAISS_INCLUDE_DIRS}
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+)
+target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
+
 
 add_custom_command(TARGET centroids_search_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/setup
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/python_udls
+        ${CMAKE_CURRENT_BINARY_DIR}/python_udls
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
+        ${CMAKE_CURRENT_BINARY_DIR}/
+    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/test_py.py
         ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/layout.json
@@ -86,6 +114,8 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/setup.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup.py
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/test_py.py
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/test_py.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
@@ -128,7 +158,6 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
 # make install
 install(TARGETS python_udl EXPORT cascade_python_udlTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfigVersion.cmake"
@@ -162,7 +191,3 @@ install(FILES
 
 set(INSTALLED_PYTHON_UDL_LIB_FILE "${CMAKE_INSTALL_LIBDIR}/$<TARGET_FILE_NAME:python_udl>")
 
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/show_cascade_python_udl.sh"
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)

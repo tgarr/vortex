@@ -1,7 +1,7 @@
 /***
  Code copied from https://github.com/Derecho-Project/cascade-demos/blob/collision_prediction_deployment/udl_zoo/python/python_udl.cpp
 ***/
-#include <derecho/persistent/PersistentInterface.hpp>
+#include <cascade/config.h>
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
@@ -424,7 +424,7 @@ public:
                                 }
                         
                                 // test if entry_class_type is a subclass of Type UserDefinedLogical.
-                                if (PythonOCDPO::is_valid_observer_type(reinterpret_cast<PyTypeObject*>(entry_class_type))) {
+                                if (!PythonOCDPO::is_valid_observer_type(reinterpret_cast<PyTypeObject*>(entry_class_type))) {
                                     dbg_default_error("Error: {} is not a subclass of derecho.cascade.udl.UserDefinedLogic. {}:{}",
                                             class_name, __FILE__, __LINE__);
                                     res.success = false;
@@ -668,7 +668,7 @@ private:
             ret = true;
         }
 
-        return false;
+        return ret;
     }
 
     /* context service interface */

@@ -62,15 +62,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
      * @return the cluster ID, -1 if not found
     ***/
     inline int get_cluster_id(const std::string& key_string) {
-        size_t pos = str.find("cluster");
+        size_t pos = key_string.find("cluster");
         if (pos == std::string::npos) {
             return -1;
         }
         pos += 7; 
         // Extract the number following "cluster"
         std::string numberStr;
-        while (pos < str.size() && std::isdigit(str[pos])) {
-            numberStr += str[pos];
+        while (pos < key_string.size() && std::isdigit(key_string[pos])) {
+            numberStr += key_string[pos];
             ++pos;
         }
         if (!numberStr.empty()) {
@@ -111,6 +111,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 2. emit the result to the subsequent UDL
         // Blob blob(object.blob);
         // emit(key_string, EMIT_NO_VERSION_AND_TIMESTAMP , blob);
+        std::cout << "[Cluster search ocdpo]: FINISHED knn search for key: " << key_string << std::endl;
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
