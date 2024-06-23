@@ -21,10 +21,13 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           '''
           Constructor
           '''
-          model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False)
+          self.encoder = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False, device="cpu")
+          self.capi = ServiceClientAPI()
+          self.centroids_embeddings = None
+          self.have_centroids_loaded = False
      
 
-     def load_centroids_embeddings(self):
+     def load_centroids_embeddings(self, cluster_id=0):
           '''
           Load the centroids embeddings
           Fill in the memory cache by getting the centroids embeddings from KV store in Cascade
@@ -37,25 +40,34 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           (The reason not to call it at initialization, is that initialization is called upon server starts, 
           but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
           '''
-          pass
-
+          self.centroids_embeddings = {}
+          # TODO: here instead of assuming 1 centroid object, there could be multiple sentroid objects
+          #       use list_keys
+          cluster_key = f"/rag/emb/centroid_batch0"
+          res = self.capi.get(cluster_key)
+          if res:
+               emb = res.get_result()['value']
+               self.centroids_embeddings = np.frombuffer(emb, dtype=np.float32)
+               print(f"embeddings: {self.centroids_embeddings} \n shape: {self.centroids_embeddings.shape}")
+          self.have_centroids_loaded = True
 
 
      def ocdpo_handler(self,**kwargs):
           key = kwargs["key"]
           blob = kwargs["blob"]
           print("PYTHON Encode_centroids_search received key: ", key)
-          array = np.array([1.1, 2.22, 3.333, 4.4444, 5.55555], dtype=np.float32)
-          cascade_context.emit(key, array)
-          # # 0. parse the query from blob
-          # # TODO: below is a placehold implement this
-          # query = [
-          #      "BGE M3 is an embedding model supporting dense retrieval, lexical matching and multi-vector interaction."
-          # ]
-          # # 1. encode the query
-          # query_embeddings = model.encode(
-          #      query, return_dense=True, return_sparse=True, return_colbert_vecs=True
-          # )
+          # 0. load centroids' embeddings
+          if not self.have_centroids_loaded:
+               self.load_centroids_embeddings()
+          # 1. process the queries from blob to embeddings
+          decoded_json_string = blob.tobytes().decode('utf-8')
+          query_list = json.loads(decoded_json_string)
+          print(query_list)
+          encode_result = self.encoder.encode(
+               query_list, return_dense=True, return_sparse=False, return_colbert_vecs=False
+          )
+          query_embeddings = encode_result['dense_vecs']
+          print(f"shape of query embeddings: {query_embeddings.shape}")
           # # 2. search the centroids
           # # TODO: implement this! Below is direct copy from faiss examples
           # d = 64                           # dimension

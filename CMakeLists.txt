@@ -51,16 +51,6 @@ target_include_directories(clusters_search_udl PRIVATE
 )
 target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
 
-# Created for Python numpy C++ processing testing
-# add_library(test_py_udl SHARED test_py_udl.cpp)
-# target_include_directories(test_py_udl PRIVATE
-#     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-#     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-#     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-#     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-# )
-# target_link_libraries(test_py_udl PRIVATE derecho::cascade)
-
 
 add_library(centroids_search_udl SHARED centroids_search_udl.cpp)
 target_include_directories(centroids_search_udl PRIVATE
@@ -82,7 +72,7 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/python_udls
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/
-    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/test_py.py
+    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
         ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/layout.json
@@ -114,8 +104,8 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/setup.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup.py
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/test_py.py
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/test_py.py
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/client_query.py
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/client_query.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
