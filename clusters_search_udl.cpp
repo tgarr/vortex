@@ -31,7 +31,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     int emb_dim = 64; // dimension of each embedding
     /*** TODO: this is a duplicated field to num_embs of GroupedEmbeddings ***/
     // same as faiss example
-    int num_embs = 100000; // number of embeddings
+    int num_embs = 10; // 100000; // number of embeddings
 
 
     /***
@@ -103,9 +103,9 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 1.1. get the embeddings of the cluster
         auto& embs = clusters_embs[cluster_id];
         // 1.2. search the top K embeddings that are close to the query
-        int nq = 10000;
+        int nq = 10; //10000;
         float* xq = new float[this->emb_dim * nq]; // Placeholder query embeddings
-        embs->faiss_gpu_search(nq, xq);
+        embs->faiss_cpu_flat_search(nq, xq);
         // 1.3. send the top K embeddings to the next stage
         
         // 2. emit the result to the subsequent UDL
