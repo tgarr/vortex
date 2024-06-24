@@ -29,13 +29,15 @@ def main(argv):
      capi.create_object_pool("/test", "VolatileCascadeStoreWithStringKey", 0)
 
      # array = np.array([1.1, 2.22, 3.333, 4.4444, 5.55555], dtype=np.float32)
-     key = "/rag/emb/py_centroids_search/cluster0"
+     client_id = 0
+     querybatch_id = 0
+     key = f"/rag/emb/py_centroids_search/client{client_id}_querybatch{querybatch_id}"
      query_list = ["hello world", "I am RAG"]
      json_string = json.dumps(query_list)
      encoded_bytes = json_string.encode('utf-8')
-     capi.put("/rag/emb/py_centroids_search/cluster0", encoded_bytes)
+     capi.put(key, encoded_bytes)
      # capi.put("/test/hello", array.tostring())  # deprecated
-     print(f"Put key:{key} value:{query_list} to Cascade.")
+     print(f"Put key:{key} \n    value:{query_list} to Cascade.")
 
      print("Done!")
 
