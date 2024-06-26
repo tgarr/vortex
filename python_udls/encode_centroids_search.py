@@ -105,13 +105,13 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                print(f"cluster_id: {cluster_id}, query_ids: {query_ids}")
                # 3.1 construct new key for subsequent udl based on cluster_id and query_ids
                ''' 
-               Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}_querybatch{querybatch_id}"
-               Change to format of "/rag/emb/centroids_search/client{client_id}_querybatch{querybatch_id}/cluster{cluster_id}_{qid-numTopK}"
-               The last part {qid-numTopK} is a map from query_id to the top_K neighbor index in the cluster_id
-                    e.g. {qid-numTopK}="qid0-2-5top4" indicate this object contains query embeddings for query 0, 2, 5
+               Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
+               Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}{qids-topK}_cluster{cluster_id}"
+               The last part {qid-topK} is a map from query_id to the top_K neighbor index in the cluster_id
+                    e.g. {qid-topK}="qids0-2-5top4" indicate this object contains query embeddings for query 0, 2, 5
                     and they use the top 4 neighbors in the cluster_id
                '''
-               key_string = f"{key}/cluster{cluster_id}_{''.join([f'qid{qid}-{i}' for i, qid in enumerate(query_ids)])}"
+               key_string = f"{key}qids{'-'.join([str(qid) for qid in query_ids])}top{self.top_K}_cluster{cluster_id}"
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
                print(f"keystring is {key_string}, query_embeddings_for_cluster shape: {query_embeddings_for_cluster.shape}")

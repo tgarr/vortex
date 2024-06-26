@@ -24,9 +24,12 @@ class GroupedEmbeddings{
      // maybe need to switch it to 2D array for dynamic RAG, to make insertion of new embeddings easier
      float* embeddings; 
 
+     
+
      // the embeddings are concatenated and stored in KV object
      // given the object size limit, there might be multiple KV objects for embeddings of a group
      // allocation of embeddings object overprovision memory to avoid frequent reallocation
+     /*** TODO: this should probably in udl instead of here. Move it there. ***/
      int num_obj;  
      int emb_per_obj;  // e.g. 100
 
@@ -40,6 +43,7 @@ public:
 
      GroupedEmbeddings(int emb_dim, int num_embs, float* embeddings, int num_obj, int emb_per_obj) 
           : emb_dim(emb_dim), num_embs(num_embs), embeddings(embeddings), num_obj(num_obj), emb_per_obj(emb_per_obj) {
+
      }
 
      // Add new embeddings into the embeddings array
@@ -61,7 +65,7 @@ public:
       * @param nq: number of queries
       * @param xq: flaten queries to search 
      ***/
-     int faiss_gpu_search(int nq, float* xq){
+     int faiss_gpu_search(int nq, float* xq, int top_k){
 
           std::cout << "FAISS GPU Search in [GroupedEmbeddings] class" << std::endl;
           // int d = 64;      // dimension
@@ -99,8 +103,8 @@ public:
           // printf("is_trained = %s\n", index_flat.is_trained ? "true" : "false");
           index_flat.add(nb, xb); // add vectors to the index
           // printf("ntotal = %ld\n", index_flat.ntotal);
-
-          int k = 4;
+          std::cout << "before search" << std::endl;
+          int k = top_k;
 
           { // search xq
                long* I = new long[k * nq];
@@ -126,7 +130,7 @@ public:
                delete[] I;
                delete[] D;
           }
-
+          std::cout << "before IVF index" << std::endl;
           // Using an IVF index
 
           int nlist = 100;
@@ -179,98 +183,24 @@ public:
       * @param nq: number of queries
       * @param xq: flaten queries to search 
      ***/
-     int faiss_cpu_flat_search(int nq, float* xq){
-
+     int faiss_cpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
           std::cout << "FAISS CPU flat Search in [GroupedEmbeddings] class" << std::endl;
-          // int d = 64;      // dimension
-          // int nb = 100000; // database size
-          // int nq = 10000;  // nb of queries
           int d = this->emb_dim; // dimension
           int nb = this->num_embs; 
 
-          std::mt19937 rng;
-          std::uniform_real_distribution<> distrib;
+          faiss::IndexFlatL2 index(d); 
+          index.add(nb, this->embeddings); // add vectors to the index
+          printf("ntotal = %zd\n", index.ntotal);
 
-          // float* xb = new float[d * nb];
-          float* xb = this->embeddings;
-
-          for (int i = 0; i < nb; i++) {
-               for (int j = 0; j < d; j++)
-                    xb[d * i + j] = distrib(rng);
-               xb[d * i] += i / 1000.;
-          }
-
-          for (int i = 0; i < nq; i++) {
-               for (int j = 0; j < d; j++)
-                    xq[d * i + j] = distrib(rng);
-               xq[d * i] += i / 1000.;
-          }
-
-          faiss::IndexFlatL2 index(d); // call constructor
-          // printf("is_trained = %s\n", index.is_trained ? "true" : "false");
-          index.add(nb, xb); // add vectors to the index
-          // printf("ntotal = %zd\n", index.ntotal);
-
-          int k = 4;
-
-          { // sanity check: search 5 first vectors of xb
-               faiss::idx_t* I = new faiss::idx_t[k * 5];
-               float* D = new float[k * 5];
-
-               index.search(5, xb, k, D, I);
-
-               // print results
-               printf("I=\n");
-               for (int i = 0; i < 5; i++) {
-                    for (int j = 0; j < k; j++)
-                         printf("%5zd ", I[i * k + j]);
-                    printf("\n");
-               }
-
-               printf("D=\n");
-               for (int i = 0; i < 5; i++) {
-                    for (int j = 0; j < k; j++)
-                         printf("%7g ", D[i * k + j]);
-                    printf("\n");
-               }
-
-               delete[] I;
-               delete[] D;
-          }
-
-          { // search xq
-               faiss::idx_t* I = new faiss::idx_t[k * nq];
-               float* D = new float[k * nq];
-
-               index.search(nq, xq, k, D, I);
-
-               // print results
-               printf("I (5 first results)=\n");
-               for (int i = 0; i < 5; i++) {
-                    for (int j = 0; j < k; j++)
-                         printf("%5zd ", I[i * k + j]);
-                    printf("\n");
-               }
-
-               printf("D (5 last results)=\n");
-               for (int i = nq - 5; i < nq; i++) {
-                    for (int j = 0; j < k; j++)
-                         printf("%5f ", D[i * k + j]);
-                    printf("\n");
-               }
-
-               delete[] I;
-               delete[] D;
-          }
-
-          // delete[] xb;
-          // delete[] xq;
-
+          int k = top_k;
+          std::cout << "before search xq" << std::endl;
+          index.search(nq, xq, k, D, I);
           return 0;
      }
 
      ~GroupedEmbeddings() {
-          free(embeddings);
+          // free(embeddings);
+          delete[] this->embeddings;
      }
 
 };

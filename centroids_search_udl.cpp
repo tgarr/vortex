@@ -28,6 +28,7 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     /*** TODO: this is a duplicated field to num_embs of GroupedEmbeddings ***/
     // same as faiss example
     int num_embs = 100000; // number of embeddings
+    int top_k = 4; // number of top K embeddings to search
 
     /***
      * Fill in the memory cache by getting the centroids embeddings from KV store in Cascade
@@ -68,7 +69,7 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             // 2. compute knn
             int nq = 10000;
             float* xq = new float[this->emb_dim * nq]; // Placeholder query embeddings
-            this->centroid_embs->faiss_gpu_search(nq, xq);
+            this->centroid_embs->faiss_gpu_search(nq, xq, this->top_k);
             // 3. emit to the subsequent UDL by sending the result to shard according to cluster_id
             // 3.1 get the cluster_id from faiss_search result
             // 3.2 emit the result to the shard

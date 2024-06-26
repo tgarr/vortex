@@ -63,7 +63,7 @@ target_include_directories(centroids_search_udl PRIVATE
 target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
 
 
-add_custom_command(TARGET centroids_search_udl POST_BUILD
+add_custom_command(TARGET clusters_search_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/setup
@@ -140,6 +140,8 @@ add_custom_command(TARGET centroids_search_udl POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/dfgs.json.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/udl_dlls.cfg.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/python_udls 
+            ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
     COMMENT "prepare centroids search configuration"
 )
 

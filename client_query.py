@@ -31,7 +31,7 @@ def main(argv):
      # array = np.array([1.1, 2.22, 3.333, 4.4444, 5.55555], dtype=np.float32)
      client_id = 0
      querybatch_id = 0
-     key = f"/rag/emb/py_centroids_search/client{client_id}_querybatch{querybatch_id}"
+     key = f"/rag/emb/py_centroids_search/client{client_id}qb{querybatch_id}"
      query_list = ["hello world", "I am RAG"]
      json_string = json.dumps(query_list)
      encoded_bytes = json_string.encode('utf-8')
