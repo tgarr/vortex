@@ -4,8 +4,15 @@
 1. FAISS : https://github.com/facebookresearch/faiss/blob/main/INSTALL.md 
 
    NVIDIA toolkit nvcc if run with GPU support
+
+   Python support needs to be built for Python centroids_search_udl
 2. cascade : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223
 3. cascade Python API : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223/src/service/python
+4. model dependencies:
+
+   BGE-M3: https://github.com/FlagOpen/FlagEmbedding 
+
+   Generator model
 
 ## Branches
 We implemented two pipeline for RAG. 
@@ -31,3 +38,10 @@ cluster embeddings stored in the format of /rag/emb/clusters/cluster[cluster_id]
 We have built a docker image that have nvcc and cascade,derecho built setup. You can pull from the docker image and run it on your environment.
 
 Image name: yy354/rag_dev:v1.0
+
+
+# Additional Note
+python_udl.cpp and its corresponding CMake contents (in CMakeLists.txt, config.h.in, cascade_python_udlConfig.cmake.in) are copied from Weijia's code in Cascade repo: 
+https://github.com/Derecho-Project/cascade/tree/master/src/udl_zoo/python
+
+Copied them here to make the build process smooth, without the need to use pathname in udl_dll.cfg to direct to where udl_zoo/python built located.
