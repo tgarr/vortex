@@ -72,7 +72,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         std::cout << "[ClustersSearchOCDPO]: num_points=" << num_points << std::endl;
         // float* xb = new float[this->emb_dim * this->num_embs]; // Placeholder embeddings
         // 2. fill in the memory cache
-        this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, emb_data, 1, 1000);
+        this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, emb_data);
+        this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
         std::cout << "[ClustersSearchOCDPO] added Cluster[" << cluster_id << "] to cache"<< std::endl;
         return;
     }

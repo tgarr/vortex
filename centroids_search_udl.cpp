@@ -46,7 +46,8 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 1. get the centroids from KV store in Cascade
         float* xb = new float[this->emb_dim * this->num_embs]; // Placeholder embeddings
         // 2. fill in the memory cache
-        this->centroid_embs = std::make_unique<GroupedEmbeddings>(this->emb_dim, this->num_embs, xb, 1, 10000);
+        this->centroid_embs = std::make_unique<GroupedEmbeddings>(this->emb_dim, this->num_embs, xb);
+        this->centroid_embs->initialize_gpu_flat_search(); // use GPU search in later program
         // 3. set the flag to true
         this->is_centroids_cached = true;
         return;
@@ -69,12 +70,16 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             // 2. compute knn
             int nq = 10000;
             float* xq = new float[this->emb_dim * nq]; // Placeholder query embeddings
-            this->centroid_embs->faiss_gpu_search(nq, xq, this->top_k);
+            long* I = new long[this->top_k * nq];
+            float* D = new float[this->top_k * nq];
+            this->centroid_embs->faiss_gpu_flatl2_search(nq, xq, this->top_k, D, I);
             // 3. emit to the subsequent UDL by sending the result to shard according to cluster_id
             // 3.1 get the cluster_id from faiss_search result
             // 3.2 emit the result to the shard
             Blob blob(object.blob);
             emit(key_string, EMIT_NO_VERSION_AND_TIMESTAMP , blob);
+            delete[] I;
+            delete[] D;
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
