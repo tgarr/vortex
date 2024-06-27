@@ -30,7 +30,9 @@
                     {
                         "python_path":["python_udls"],
                         "module":"encode_centroids_search",
-                        "entry_class":"EncodeCentroidsSearchUDL"
+                        "entry_class":"EncodeCentroidsSearchUDL",
+                        "emb_dim":1024,
+                        "top_k":4
                     }],
                 "destinations": [{"/rag/emb/clusters_search":"put"}]
             },
@@ -40,8 +42,8 @@
                 "user_defined_logic_list": ["11a2c123-2200-21ac-1755-0002ac220000"],
                 "user_defined_logic_config_list": [
                 {
-                        "emb_dim":100,
-                        "top_k":9
+                        "emb_dim":1024,
+                        "top_k":4
                 }],
                 "destinations": [{"/rag/generate":"trigger_put"}]
             },
@@ -54,7 +56,8 @@
                     {
                         "python_path":["python_udls"],
                         "module":"aggregate_generate",
-                        "entry_class":"AggregateGenerateUDL"
+                        "entry_class":"AggregateGenerateUDL",
+                        "top_k":4
                     }],
                 "destinations": [{}]
             }

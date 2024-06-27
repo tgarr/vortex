@@ -42,6 +42,8 @@ class AggregateGenerateUDL(UserDefinedLogic):
           '''
           # Aggregated query results {(client_id,query_id):{query_id: ClusterSearchResults, ...}, ...}
           self.agg_query_results = {}
+          self.conf = json.loads(conf_str)
+          self.top_k = int(self.conf["top_k"])
             
 
 
@@ -60,7 +62,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           client_id = int(match.group(1))
           querybatch_id = int(match.group(2))
           qid = int(match.group(3))
-          topK = int(match.group(4))
+          top_clusters_count = int(match.group(4)) # topK clusters selected by centroids search
           cluster_id = int(match.group(5))
 
           # 1. parse the blob to dict
@@ -72,8 +74,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           if (client_id, querybatch_id) not in self.agg_query_results:
                self.agg_query_results[(client_id, querybatch_id)] = {}
           if qid not in self.agg_query_results[(client_id, querybatch_id)]:
-               # TODO: currently assume we want to select topK from topK cluster's results
-               self.agg_query_results[(client_id, querybatch_id)][qid] = ClusterSearchResults(topK, topK)
+               self.agg_query_results[(client_id, querybatch_id)][qid] = ClusterSearchResults(top_clusters_count, self.top_k)
           self.agg_query_results[(client_id, querybatch_id)][qid].add_cluster_result(cluster_id, cluster_result)
           
           # 3. check if all results are collected

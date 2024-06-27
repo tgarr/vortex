@@ -15,6 +15,8 @@ SUBGROUP_TYPES = {
         "TCSS": "TriggerCascadeNoStoreWithStringKey"
         }
 
+EMBEDDING_DIM = 1024
+
 
 def create_object_pool(capi, basepath):
     # create object pools
@@ -56,14 +58,14 @@ def put_initial_embeddings(capi, basepath):
     fpath = os.path.join(basepath,OBJECT_POOLS_LIST)
     num_clusters = 5 # TODO: temp start with 5 clusters
     # 1. Put centroids'embeddings to cascade
-    centroids_embs = get_embeddings(basepath, filename="centroids.pkl", num_embs=num_clusters) 
+    centroids_embs = get_embeddings(basepath, filename="centroids.pkl", d=EMBEDDING_DIM, num_embs=num_clusters) 
     key = "/rag/emb/centroid_chunk0"
     capi.put(key, centroids_embs.tobytes())
 
     # 2. put clusters' embeddings to cascade
     for cluster_id in range(num_clusters):
         key = f"/rag/emb/cluster{cluster_id}"
-        cluster_embs = get_embeddings(basepath, filename=f"cluster{cluster_id}.pkl")
+        cluster_embs = get_embeddings(basepath, filename=f"cluster{cluster_id}.pkl", d=EMBEDDING_DIM, num_embs=100)
         capi.put(key, cluster_embs.tobytes())
 
 

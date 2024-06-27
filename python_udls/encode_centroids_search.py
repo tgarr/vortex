@@ -25,11 +25,12 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           self.encoder = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False, device="cpu")
           self.capi = ServiceClientAPI()
           self.centroids_embeddings = None
-          self.have_centroids_loaded = False
 
-          self.top_K = 4  # TODO: hard code for now, use the number in faiss
-          self.emb_dim = 64 # TODO: get this from config, for now hard code it
           self.num_embs = 0
+
+          self.conf = json.loads(conf_str)
+          self.top_k = int(self.conf["top_k"])
+          self.emb_dim = int(self.conf["emb_dim"])
           self.index = faiss.IndexFlatL2(self.emb_dim)
           
      
@@ -65,9 +66,9 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
 
      def combine_common_clusters(self, knn_result_I):
           '''
-          combine queries that have the same top_K neighbor clusters results,
+          combine queries that have the same top_k neighbor clusters results,
           to do batch message sending and processing
-          @param knn_result_I: the top_K neighbor clusters for each query. 
+          @param knn_result_I: the top_k neighbor clusters for each query. 
                                 Result from faiss knn index search
           '''
           neighbor_to_queries = defaultdict(list)
@@ -84,7 +85,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           message_id = kwargs["message_id"]
           print("PYTHON Encode_centroids_search received key: ", key)
           # 0. load centroids' embeddings
-          if not self.have_centroids_loaded:
+          if self.centroids_embeddings == None:
                self.load_centroids_embeddings()
           # 1. process the queries from blob to embeddings
           decoded_json_string = blob.tobytes().decode('utf-8')
@@ -94,11 +95,11 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                query_list, return_dense=True, return_sparse=False, return_colbert_vecs=False
           )
           query_embeddings = encode_result['dense_vecs']
-          query_embeddings = query_embeddings[:, :64]  # TODO: remove this. temporarily use this to test original faiss implementation
+          query_embeddings = query_embeddings[:, :self.emb_dim]  # TODO: remove this. temporarily use this to test original faiss implementation
           print(f"shape of query embeddings: {query_embeddings.shape}")
           # 2. search the centroids
-          D, I = self.index.search(query_embeddings, self.top_K)     # actual search
-          print(I[:5])                   # print top 5 query top_K neighbors
+          D, I = self.index.search(query_embeddings, self.top_k)     # actual search
+          print(I[:5])                   # print top 5 query top_k neighbors
           # 3. trigger the subsequent UDL by evict the query to the top M shards according to affinity set sharding policy
           clusters_to_queries = self.combine_common_clusters(I)
           for cluster_id, query_ids in clusters_to_queries.items():
@@ -107,11 +108,11 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                ''' 
                Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
                Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}{qids-topK}_cluster{cluster_id}"
-               The last part {qid-topK} is a map from query_id to the top_K neighbor index in the cluster_id
+               The last part {qid-topK} is a map from query_id to the top_k neighbor index in the cluster_id
                     e.g. {qid-topK}="qids0-2-5top4" indicate this object contains query embeddings for query 0, 2, 5
                     and they use the top 4 neighbors in the cluster_id
                '''
-               key_string = f"{key}qids{'-'.join([str(qid) for qid in query_ids])}top{self.top_K}_cluster{cluster_id}"
+               key_string = f"{key}qids{'-'.join([str(qid) for qid in query_ids])}top{self.top_k}_cluster{cluster_id}"
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
                print(f"keystring is {key_string}, query_embeddings_for_cluster shape: {query_embeddings_for_cluster.shape}")
