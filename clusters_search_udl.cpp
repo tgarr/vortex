@@ -26,8 +26,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     // maps from cluster ID -> embeddings of that cluster, 
     // because there could be more than 1 clusters hashed to one node by affinity set.
     std::unordered_map<int, std::unique_ptr<GroupedEmbeddings>> clusters_embs;
-    /*** TODO: get this from dfgs config ***/
-    // faiss example uses 64
+
+    // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
     int top_k = 4; // number of top K embeddings to search
 
@@ -215,6 +215,20 @@ public:
     static auto get() {
         return ocdpo_ptr;
     }
+
+    void set_config(const nlohmann::json& config){
+        try{
+            if (config.contains("emb_dim")) {
+                this->emb_dim = config["emb_dim"].get<int>();
+            }
+            if (config.contains("top_k")) {
+                this->top_k = config["top_k"].get<int>();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;
+            dbg_default_error("Failed to convert emb_dim or top_k from config, at clusters_search_udl.");
+        }
+    }
 };
 
 std::shared_ptr<OffCriticalDataPathObserver> ClustersSearchOCDPO::ocdpo_ptr;
@@ -224,7 +238,8 @@ void initialize(ICascadeContext* ctxt) {
 }
 
 std::shared_ptr<OffCriticalDataPathObserver> get_observer(
-        ICascadeContext*,const nlohmann::json&) {
+        ICascadeContext*,const nlohmann::json& config) {
+    std::static_pointer_cast<ClustersSearchOCDPO>(ClustersSearchOCDPO::get())->set_config(config);
     return ClustersSearchOCDPO::get();
 }
 
