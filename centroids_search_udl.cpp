@@ -22,11 +22,8 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     // embeddings of centroids, assume that the embeddings are in order of the centroids from 0 to last_centroid_id
     std::unique_ptr<GroupedEmbeddings> centroid_embs;
     bool is_centroids_cached = false;
-    /*** TODO: get this from dfgs config ***/
-    // faiss example uses 64
+    // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
-    /*** TODO: this is a duplicated field to num_embs of GroupedEmbeddings ***/
-    // same as faiss example
     int num_embs = 100000; // number of embeddings
     int top_k = 4; // number of top K embeddings to search
 
@@ -92,6 +89,20 @@ public:
     static auto get() {
         return ocdpo_ptr;
     }
+
+    void set_config(const nlohmann::json& config){
+        try{
+            if (config.contains("emb_dim")) {
+                this->emb_dim = config["emb_dim"].get<int>();
+            }
+            if (config.contains("top_k")) {
+                this->top_k = config["top_k"].get<int>();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;
+            dbg_default_error("Failed to convert emb_dim or top_k from config, at clusters_search_udl.");
+        }
+    }
 };
 
 std::shared_ptr<OffCriticalDataPathObserver> CentroidsSearchOCDPO::ocdpo_ptr;
@@ -101,7 +112,8 @@ void initialize(ICascadeContext* ctxt) {
 }
 
 std::shared_ptr<OffCriticalDataPathObserver> get_observer(
-        ICascadeContext*,const nlohmann::json&) {
+        ICascadeContext*,const nlohmann::json& config) {
+    std::static_pointer_cast<CentroidsSearchOCDPO>(CentroidsSearchOCDPO::get())->set_config(config);
     return CentroidsSearchOCDPO::get();
 }
 

@@ -26,8 +26,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     // maps from cluster ID -> embeddings of that cluster, 
     // because there could be more than 1 clusters hashed to one node by affinity set.
     std::unordered_map<int, std::unique_ptr<GroupedEmbeddings>> clusters_embs;
-    /*** TODO: get this from dfgs config ***/
-    // faiss example uses 64
+
+    // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
     int top_k = 4; // number of top K embeddings to search
 
@@ -50,19 +50,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                    otherwise, use emplace to avoid copy  ***/
         std::string cluster_emb_key = "/rag/emb/cluster" + std::to_string(cluster_id);
         // 1.1. get the object from KV store
-        Blob blob;
         int cluster_num_embs = 0;
-        bool stable = 1; // TODO: double check to see if this is the most efficient way
+        bool stable = 1; 
         persistent::version_t version = CURRENT_VERSION;
-        auto result = typed_ctxt->get_service_client_ref().get(cluster_emb_key,version, stable);
-        for(auto& reply_future : result.get()) {
-            auto reply = reply_future.second.get();
-            blob = reply.blob;
-            /*** TODO: Figure out how is Blob object constructed and deconstructed for memory safety, 
-                        check if this is correct way to get without additional copy ***/
-            blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED;
-            break;
-        }
+        auto query_results = typed_ctxt->get_service_client_ref().get(cluster_emb_key,version, stable);
+        auto& reply = query_results.get().begin()->second.get();
+        /*** TODO: confirm the way of handling it is correct. ***/
+        Blob blob = std::move(const_cast<Blob&>(reply.blob));
+        blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED; // Avoid copy, use bytes from reply.blob, transfer its ownership to GroupedEmbeddings.emb_data
+
         // 1.2. get the embeddings from the object
         float* data = const_cast<float*>(reinterpret_cast<const float *>(blob.bytes));
         float (*emb_array)[this->emb_dim] = reinterpret_cast<float (*)[this->emb_dim]>(data); // convert 1D float array to 2D
@@ -70,7 +66,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         size_t num_points = blob.size / sizeof(float);
         cluster_num_embs += num_points / this->emb_dim;
         std::cout << "[ClustersSearchOCDPO]: num_points=" << num_points << std::endl;
-        // float* xb = new float[this->emb_dim * this->num_embs]; // Placeholder embeddings
+        
         // 2. fill in the memory cache
         this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, emb_data);
         this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
@@ -215,6 +211,20 @@ public:
     static auto get() {
         return ocdpo_ptr;
     }
+
+    void set_config(const nlohmann::json& config){
+        try{
+            if (config.contains("emb_dim")) {
+                this->emb_dim = config["emb_dim"].get<int>();
+            }
+            if (config.contains("top_k")) {
+                this->top_k = config["top_k"].get<int>();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;
+            dbg_default_error("Failed to convert emb_dim or top_k from config, at clusters_search_udl.");
+        }
+    }
 };
 
 std::shared_ptr<OffCriticalDataPathObserver> ClustersSearchOCDPO::ocdpo_ptr;
@@ -224,7 +234,8 @@ void initialize(ICascadeContext* ctxt) {
 }
 
 std::shared_ptr<OffCriticalDataPathObserver> get_observer(
-        ICascadeContext*,const nlohmann::json&) {
+        ICascadeContext*,const nlohmann::json& config) {
+    std::static_pointer_cast<ClustersSearchOCDPO>(ClustersSearchOCDPO::get())->set_config(config);
     return ClustersSearchOCDPO::get();
 }
 
