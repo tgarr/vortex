@@ -35,7 +35,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           
      
 
-     def load_centroids_embeddings(self, cluster_id=0):
+     def load_centroids_embeddings(self):
           '''
           Load the centroids embeddings
           Fill in the memory cache by getting the centroids embeddings from KV store in Cascade
@@ -48,20 +48,28 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           (The reason not to call it at initialization, is that initialization is called upon server starts, 
           but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
           '''
-          self.centroids_embeddings = {}
-          # TODO: here instead of assuming 1 centroid object, there could be multiple sentroid objects
-          #       use list_keys
-          cluster_key = f"/rag/emb/centroid_chunk0"
-          res = self.capi.get(cluster_key)
-          if not res:
-               print(f"Failed to get the centroids embeddings from key: {cluster_key}")
+          centroids_key_prefix = "/rag/emb/centroids"
+          centroids_obj_keys = self.capi.list_keys_in_object_pool(centroids_key_prefix)[0].get_result()
+          print(f"centroids_obj_keys: {centroids_obj_keys}")
+          if len(centroids_obj_keys) == 0:
+               print(f"Failed to get the centroids embeddings from key: {centroids_key_prefix}")
                return
-          emb = res.get_result()['value']
-          flattend_emb = np.frombuffer(emb, dtype=np.float32)
-          self.centroids_embeddings = flattend_emb.reshape(-1, self.emb_dim) # reshape to 2D array
+          for cluster_key in centroids_obj_keys:
+               res = self.capi.get(cluster_key)
+               if not res:
+                    print(f"Failed to get the centroids embeddings from key: {cluster_key}")
+                    return
+               emb = res.get_result()['value']
+               flattend_emb = np.frombuffer(emb, dtype=np.float32)
+               flattend_emb = flattend_emb.reshape(-1, self.emb_dim) # FAISS PYTHON API requires to reshape to 2D array
+               if self.centroids_embeddings is None:
+                    self.centroids_embeddings = flattend_emb
+               else:
+                    self.centroids_embeddings = np.concatenate((self.centroids_embeddings, flattend_emb), axis=0)
           print(f"loaded centroid_embeddings shape: {self.centroids_embeddings.shape}")
           self.index.add(self.centroids_embeddings)
           self.have_centroids_loaded = True
+          # array1 = np.concatenate((array1, array2), axis=0)
 
 
      def combine_common_clusters(self, knn_result_I):
@@ -83,7 +91,6 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           blob = kwargs["blob"]
           pathname = kwargs["pathname"]
           message_id = kwargs["message_id"]
-          print("PYTHON Encode_centroids_search received key: ", key)
           # 0. load centroids' embeddings
           if self.centroids_embeddings == None:
                self.load_centroids_embeddings()
@@ -115,10 +122,8 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                key_string = f"{key}qids{'-'.join([str(qid) for qid in query_ids])}top{self.top_k}_cluster{cluster_id}"
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
-               print(f"keystring is {key_string}, query_embeddings_for_cluster shape: {query_embeddings_for_cluster.shape}")
                cascade_context.emit(key_string, query_embeddings_for_cluster,message_id=message_id)
-               print(f"emitted!")
-               
+          print(f"EncodeCentroidsSearchUDL: emitted subsequent for key({key})")
 
      def __del__(self):
           pass

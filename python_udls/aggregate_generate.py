@@ -30,6 +30,22 @@ class ClusterSearchResults:
      def collected_all_results(self):
           return len(self.cluster_results) == self.cluster_counts
 
+     def select_top_K(self):
+          '''
+          Select the top top_k results from all cluster results
+          @return top_K cluster_id and emb_id
+          '''
+          all_results = []
+          for cluster_id, embeddings in self.cluster_results.items():
+               for emb_id, distance in embeddings.items():
+                    all_results.append((distance, cluster_id, emb_id))
+
+          all_results.sort(key=lambda x: x[0])
+          top_k_results = all_results[:self.top_k]
+          return top_k_results
+          
+
+
 
 
 
@@ -79,8 +95,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
           
           # 3. check if all results are collected
           if self.agg_query_results[(client_id, querybatch_id)][qid].collected_all_results():
-               print(f"~~~~~~ [AggregateGenerate] collected all results for client{client_id}qb{querybatch_id}qid{qid}")
                # 4. aggregate the results
+               top_k_results = self.agg_query_results[(client_id, querybatch_id)][qid].select_top_K()
+               print(f"~~~~~~ [AggregateGenerate] client{client_id}batch{querybatch_id}qid{qid} top_k_results: {top_k_results}")
 
 
                
