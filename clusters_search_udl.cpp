@@ -40,35 +40,46 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
      * In dynamic RAG setting, this function could be extended to call periodically or upon notification 
      * (The reason of not filling it at initialization, is that initialization is called upon server starts, 
      *  but the data have not been put to the servers yet, this needs to be called after the clusters' embeddings data are put)
+     * @param cluster_id the cluster ID to get the embeddings
+     * @param typed_ctxt the context to get the service client reference
+     * @note we load the stabled version of the cluster embeddings
     ***/
     void fill_cluster_embs_in_cache(int cluster_id, 
-                                    DefaultCascadeContextType* typed_ctxt){
+                                    DefaultCascadeContextType* typed_ctxt,
+                                    const std::string& object_pool_pathname){
+        std::cout << "at ClusterSearchOCDPO, fill_cluster object_pool_pathname=" << object_pool_pathname << std::endl;
+        bool stable = 1; 
+        persistent::version_t version = CURRENT_VERSION;
+        // 0. check the keys for this cluster embedding objects stored in cascade
+        //    because of the message size, one cluster might need multiple objects to store its embeddings
+        std::vector<std::string> cluster_emb_obj_keys;
+        auto keys_future = typed_ctxt->get_service_client_ref().list_keys(version, stable, object_pool_pathname);
+        auto keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
+        for (auto& key : keys) {
+            if (key.find("cluster" + std::to_string(cluster_id)) != std::string::npos) {
+                cluster_emb_obj_keys.push_back(key);
+            }
+        }
+
         // 1. Get the cluster embeddings from KV store in Cascade
         // 1.0. construct the keys to get the cluster embeddings
-        /*** TODO: use list key to get all cluster emb objects of this cluster
-                   if it is more than one objects, copy objects to a memory for storing the concatenated embeddings.
-                   otherwise, use emplace to avoid copy  ***/
         std::string cluster_emb_key = "/rag/emb/cluster" + std::to_string(cluster_id);
         // 1.1. get the object from KV store
         int cluster_num_embs = 0;
-        bool stable = 1; 
-        persistent::version_t version = CURRENT_VERSION;
-        auto query_results = typed_ctxt->get_service_client_ref().get(cluster_emb_key,version, stable);
-        auto& reply = query_results.get().begin()->second.get();
+        auto get_query_results = typed_ctxt->get_service_client_ref().get(cluster_emb_key,version, stable);
+        auto& reply = get_query_results.get().begin()->second.get();
         /*** TODO: confirm the way of handling it is correct. ***/
         Blob blob = std::move(const_cast<Blob&>(reply.blob));
         blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED; // Avoid copy, use bytes from reply.blob, transfer its ownership to GroupedEmbeddings.emb_data
 
         // 1.2. get the embeddings from the object
         float* data = const_cast<float*>(reinterpret_cast<const float *>(blob.bytes));
-        float (*emb_array)[this->emb_dim] = reinterpret_cast<float (*)[this->emb_dim]>(data); // convert 1D float array to 2D
-        float* emb_data = &emb_array[0][0];
         size_t num_points = blob.size / sizeof(float);
         cluster_num_embs += num_points / this->emb_dim;
         std::cout << "[ClustersSearchOCDPO]: num_points=" << num_points << std::endl;
         
         // 2. fill in the memory cache
-        this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, emb_data);
+        this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, data);
         this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
         std::cout << "[ClustersSearchOCDPO] added Cluster[" << cluster_id << "] to cache"<< std::endl;
         return;
@@ -158,22 +169,20 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 1.1. check if local cache contains the embeddings of the cluster
         auto it = this->clusters_embs.find(cluster_id);
         if (it == this->clusters_embs.end()){
-            fill_cluster_embs_in_cache(cluster_id, typed_ctxt);
+            fill_cluster_embs_in_cache(cluster_id, typed_ctxt, object_pool_pathname);
             it = this->clusters_embs.find(cluster_id);
         }
         // 1.2. get the embeddings of the cluster
         auto& embs = it->second;
 
         // 2. get the query embeddings from the object
-        float* data = const_cast<float*>(reinterpret_cast<const float *>(object.blob.bytes)); /*** TODO: check if need to delete this? ***/
+        float* data = const_cast<float*>(reinterpret_cast<const float *>(object.blob.bytes));
         int nq = static_cast<int>(object.blob.size / sizeof(float)) / this->emb_dim;
-        float (*emb_array)[this->emb_dim] = reinterpret_cast<float (*)[this->emb_dim]>(data); // convert 1D float array to 2D
-        float* query_emb_data = &emb_array[0][0];
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
         float* D = new float[this->top_k * nq];
-        embs->faiss_cpu_flat_search(nq, query_emb_data, this->top_k, D, I);
+        embs->faiss_cpu_flat_search(nq, data, this->top_k, D, I);
 
         // 4. emit the result to the subsequent UDL
         // 4.1 construct new keys for all queries in this search
