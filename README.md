@@ -29,19 +29,12 @@ We implemented two pipeline for RAG.
 ## Data Storage configuration
 - embeddings: stored in /rag/emb object pool
 
-centroids stored in the format of /rag/emb/centroid_[obj_id], e.g. /rag/emb/centroid_file1, /rag/emb/centroid_file2
+centroids stored in the format of /rag/emb/centroids/[obj_id], e.g. /rag/emb/centroids/1, /rag/emb/centroids/2
 
-cluster embeddings stored in the format of /rag/emb/clusters/cluster[cluster_id]_[obj_id], e.g. /rag/emb/clusters/cluster1_0, /rag/emb/clusters/cluster2_0
+cluster embeddings stored in the format of /rag/emb/cluster[cluster_id]/[obj_id], e.g. /rag/emb/cluster1/0, /rag/emb/cluster2/0
 
 
 # Docker image
 We have built a docker image that have nvcc and cascade,derecho built setup. You can pull from the docker image and run it on your environment.
 
 Image name: yy354/rag_dev:v1.0
-
-
-# Additional Note
-python_udl.cpp and its corresponding CMake contents (in CMakeLists.txt, config.h.in, cascade_python_udlConfig.cmake.in) are copied from Weijia's code in Cascade repo: 
-https://github.com/Derecho-Project/cascade/tree/master/src/udl_zoo/python
-
-Copied them here to make the build process smooth, without the need to use pathname in udl_dll.cfg to direct to where udl_zoo/python built located.

@@ -15,6 +15,11 @@ SUBGROUP_TYPES = {
         "TCSS": "TriggerCascadeNoStoreWithStringKey"
         }
 
+EMBEDDING_DIM = 1024
+NUM_CENTROIDS = 6 # TODO: temp start with 6 clusters
+NUM_EMB_PER_CENTROIDS = 10000
+NUM_EMB_PER_OBJ = 200 # < 1MB/4KB = 250
+
 
 def create_object_pool(capi, basepath):
     # create object pools
@@ -32,11 +37,15 @@ def create_object_pool(capi, basepath):
                 res = capi.create_object_pool(pool_path,SUBGROUP_TYPES[subgroup_type],subgroup_index,affinity_set_regex=affinity_set_regex)
                 if res:
                     res.get_result()
+                else:
+                    print(f"Failed to create the object pool: {pool_path}")
             else:
                 print(f"  {pool_path} {subgroup_type} {subgroup_index}")
                 res = capi.create_object_pool(pool_path,SUBGROUP_TYPES[subgroup_type],subgroup_index)
                 if res:
                     res.get_result()
+                else:
+                    print(f"Failed to create the object pool: {pool_path}")
             # time.sleep(0.5)
 
 
@@ -54,17 +63,35 @@ def get_embeddings(basepath, filename="centroids.pkl", d=64, num_embs=100):
 def put_initial_embeddings(capi, basepath):
     print("Putting centroids and clusters' embeddings to cascade server ...")
     fpath = os.path.join(basepath,OBJECT_POOLS_LIST)
-    num_clusters = 5 # TODO: temp start with 5 clusters
+    num_clusters = NUM_CENTROIDS 
     # 1. Put centroids'embeddings to cascade
-    centroids_embs = get_embeddings(basepath, filename="centroids.pkl", num_embs=num_clusters) 
-    key = "/rag/emb/centroid_chunk0"
-    capi.put(key, centroids_embs.tobytes())
+    #  For quick test purpose, manually created two centroids objects, TODO: replace with real data
+    centroids_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=int(num_clusters/2))
+    key = "/rag/emb/centroids/0"
+    res = capi.put(key, centroids_embs.tobytes())
+    key = "/rag/emb/centroids/1"
+    res = capi.put(key, centroids_embs.tobytes())
+    if res:
+        res.get_result()
+    else:
+        print(f"Failed to put the centroids embeddings to key: {key}")
+    print("Initialized: Put the centroids embeddings")
 
     # 2. put clusters' embeddings to cascade
     for cluster_id in range(num_clusters):
-        key = f"/rag/emb/cluster{cluster_id}"
-        cluster_embs = get_embeddings(basepath, filename=f"cluster{cluster_id}.pkl")
-        capi.put(key, cluster_embs.tobytes())
+        num_to_put = NUM_EMB_PER_CENTROIDS  
+        for i in range(int(NUM_EMB_PER_CENTROIDS/NUM_EMB_PER_OBJ) + 1):
+            key = f"/rag/emb/cluster{cluster_id}/{i}"
+            obj_num_to_put = min(num_to_put, NUM_EMB_PER_OBJ)
+            cluster_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=obj_num_to_put)
+            res = capi.put(key, cluster_embs.tobytes())
+            if res:
+                res.get_result()
+            else:
+                print(f"Failed to put the cluster embeddings to key: {key}")
+            num_to_put -= NUM_EMB_PER_OBJ
+            i += 1
+    print(f"Initialized: Put the clusters embeddings")
 
 
 def main(argv):

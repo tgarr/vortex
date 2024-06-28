@@ -1,3 +1,3 @@
-/rag/emb VCSS 0 _cluster[0-9]+
+/rag/emb VCSS 0 cluster[0-9]+
 /rag/doc PCSS 0
 /rag/generate TCSS 0
