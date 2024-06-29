@@ -198,6 +198,67 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         return new_keys; 
     }
 
+    /*** 
+     * Helper function to cdpo_handler()
+    ***/
+    inline void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
+                                                                const std::size_t data_size,
+                                                                int32_t& nq,
+                                                                float*& query_embeddings,
+                                                                std::vector<std::string>& queries) {
+        
+        // 0. get the number of queries in the blob object
+        nq =(static_cast<int32_t>(bytes[0]) << 24) |
+                (static_cast<int32_t>(bytes[1]) << 16) |
+                (static_cast<int32_t>(bytes[2]) << 8)  |
+                (static_cast<int32_t>(bytes[3]));
+        std::cout << "Number of queries: " << nq << std::endl;
+        // 1. get the emebddings of the queries from the blob object
+        std::size_t float_array_start = 4;
+        std::size_t float_array_size = sizeof(float) * this->emb_dim * nq;
+        std::size_t float_array_end = float_array_start + float_array_size;
+        if (data_size < float_array_end) {
+            std::cerr << "Data size "<< data_size <<" is too small for the expected float array end: " << float_array_end <<"." << std::endl;
+            return;
+        }
+        query_embeddings = const_cast<float*>(reinterpret_cast<const float*>(bytes + float_array_start));
+        // print test
+        // std::size_t num_floats = emb_dim * nq;
+        // std::cout << "Float array values:" << std::endl;
+        // for (std::size_t i = 0; i < num_floats; ++i) {
+        //     std::cout << query_embeddings[i] << " ";
+        // }
+        // std::cout << std::endl;
+
+        // 2. get the queries from the blob object
+        std::size_t json_start = float_array_end;
+        if (json_start >= data_size) {
+            std::cerr << "No space left for queries data." << std::endl;
+            return;
+        }
+        // Create a JSON string from the remainder of the bytes object
+        char* json_data = const_cast<char*>(reinterpret_cast<const char*>(bytes + json_start));
+        std::size_t json_size = data_size - json_start;
+        std::string json_string(json_data, json_size);
+
+        // Parse the JSON string using nlohmann/json
+        nlohmann::json parsed_json;
+        try {
+            parsed_json = nlohmann::json::parse(json_string);
+            if (parsed_json.is_array() && parsed_json.size() > 0 && parsed_json[0].is_string()) {
+                queries = parsed_json.get<std::vector<std::string>>();
+                std::cout << "Parsed list of strings from JSON:" << std::endl;
+                for (const auto& str : queries) {
+                    std::cout << str << std::endl;
+                }
+            } else {
+                std::cerr << "JSON data is not a list of strings." << std::endl;
+            }
+        } catch (const nlohmann::json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+        }
+    }
+
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
                                const std::string& key_string,
@@ -226,8 +287,11 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         auto& embs = it->second;
 
         // 2. get the query embeddings from the object
-        float* data = const_cast<float*>(reinterpret_cast<const float *>(object.blob.bytes));
-        int nq = static_cast<int>(object.blob.size / sizeof(float)) / this->emb_dim;
+
+        float* data;
+        int32_t nq;
+        std::vector<std::string> queries;
+        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,queries);
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];

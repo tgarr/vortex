@@ -122,7 +122,18 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                key_string = f"{key}qids{'-'.join([str(qid) for qid in query_ids])}top{self.top_k}_cluster{cluster_id}"
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
-               cascade_context.emit(key_string, query_embeddings_for_cluster,message_id=message_id)
+               quries = [query_list[qid] for qid in query_ids]
+               query_list_json = json.dumps(quries)
+               query_list_json_bytes = query_list_json.encode('utf-8')
+               # flatten query_embeddings_for_cluster to a 1d array
+               # query_embeddings_for_cluster = query_embeddings_for_cluster.tobytes()
+               # then append number of queries at the beginning
+               num_queries = len(query_ids)
+               num_queries_bytes = num_queries.to_bytes(4, byteorder='big')
+               query_embeddings_for_cluster = num_queries_bytes + query_embeddings_for_cluster
+               #  append query_list_json to query_embeddings_for_cluster
+               query_embeddings_and_query_list = query_embeddings_for_cluster + query_list_json_bytes
+               cascade_context.emit(key_string, query_embeddings_and_query_list, message_id=message_id)
           print(f"EncodeCentroidsSearchUDL: emitted subsequent for key({key})")
 
      def __del__(self):
