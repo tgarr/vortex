@@ -60,6 +60,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           self.agg_query_results = {}
           self.conf = json.loads(conf_str)
           self.top_k = int(self.conf["top_k"])
+          self.top_clusters_count = int(self.conf["top_clusters_count"])
             
 
 
@@ -67,37 +68,37 @@ class AggregateGenerateUDL(UserDefinedLogic):
           key = kwargs["key"]
           blob = kwargs["blob"]
           pathname = kwargs["pathname"]
-          # message_id = kwargs["message_id"]
-          # key format: "client{client_id}qb{querybatch_id}qid{qid}top{topK}_cluster{cluster_id}"
-          # value format: json string of {emb_id: distance, ...}
-          # extract client_id, querybatch_id, qid, topK, cluster_id
-          match = re.match(r"client(\d+)qb(\d+)qid(\d+)top(\d+)_cluster(\d+)", key)
+          match = re.match(r"client(\d+)qb(\d+)_cluster(\d+)_qid(\d+)", key)
           if not match:
-               print("[AggregateGenerate] invalid key format")
+               print(f"[AggregateGenerate] received an object with invalid key format")
                return
           client_id = int(match.group(1))
           querybatch_id = int(match.group(2))
-          qid = int(match.group(3))
-          top_clusters_count = int(match.group(4)) # topK clusters selected by centroids search
-          cluster_id = int(match.group(5))
+          cluster_id = int(match.group(3))
+          qid = int(match.group(4))
+          
 
           # 1. parse the blob to dict
           bytes_obj = blob.tobytes()
           json_str_decoded = bytes_obj.decode('utf-8')
           cluster_result = json.loads(json_str_decoded)
+          query = cluster_result["query"]
+          print(f"----- query :{query}")
           
           # 2. add the cluster result to the aggregated query results
           if (client_id, querybatch_id) not in self.agg_query_results:
                self.agg_query_results[(client_id, querybatch_id)] = {}
           if qid not in self.agg_query_results[(client_id, querybatch_id)]:
-               self.agg_query_results[(client_id, querybatch_id)][qid] = ClusterSearchResults(top_clusters_count, self.top_k)
+               self.agg_query_results[(client_id, querybatch_id)][qid] = ClusterSearchResults(self.top_clusters_count, self.top_k)
           self.agg_query_results[(client_id, querybatch_id)][qid].add_cluster_result(cluster_id, cluster_result)
           
           # 3. check if all results are collected
           if self.agg_query_results[(client_id, querybatch_id)][qid].collected_all_results():
                # 4. aggregate the results
                top_k_results = self.agg_query_results[(client_id, querybatch_id)][qid].select_top_K()
-               print(f"~~~~~~ [AggregateGenerate] client{client_id}batch{querybatch_id}qid{qid} top_k_results: {top_k_results}")
+               print(f"~~~~~~ [AggregateGenerate] client{client_id}batch{querybatch_id} \
+                      \n       query: {query} \
+                      \n       top_k_results: {top_k_results}")
 
 
                

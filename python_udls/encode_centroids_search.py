@@ -114,25 +114,19 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                # 3.1 construct new key for subsequent udl based on cluster_id and query_ids
                ''' 
                Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
-               Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}{qids-topK}_cluster{cluster_id}"
-               The last part {qid-topK} is a map from query_id to the top_k neighbor index in the cluster_id
-                    e.g. {qid-topK}="qids0-2-5top4" indicate this object contains query embeddings for query 0, 2, 5
-                    and they use the top 4 neighbors in the cluster_id
+               Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}_cluster{cluster_id}"
                '''
-               key_string = f"{key}qids{'-'.join([str(qid) for qid in query_ids])}top{self.top_k}_cluster{cluster_id}"
+               key_string = f"{key}_cluster{cluster_id}"
+               print("EncodeCentroidsSearchUDL: emitting subsequent for key({key})")
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
+               query_embeddings_bytes = query_embeddings_for_cluster.tobytes()
                quries = [query_list[qid] for qid in query_ids]
                query_list_json = json.dumps(quries)
                query_list_json_bytes = query_list_json.encode('utf-8')
-               # flatten query_embeddings_for_cluster to a 1d array
-               # query_embeddings_for_cluster = query_embeddings_for_cluster.tobytes()
-               # then append number of queries at the beginning
                num_queries = len(query_ids)
                num_queries_bytes = num_queries.to_bytes(4, byteorder='big')
-               query_embeddings_for_cluster = num_queries_bytes + query_embeddings_for_cluster
-               #  append query_list_json to query_embeddings_for_cluster
-               query_embeddings_and_query_list = query_embeddings_for_cluster + query_list_json_bytes
+               query_embeddings_and_query_list =  num_queries_bytes + query_embeddings_bytes + query_list_json_bytes
                cascade_context.emit(key_string, query_embeddings_and_query_list, message_id=message_id)
           print(f"EncodeCentroidsSearchUDL: emitted subsequent for key({key})")
 

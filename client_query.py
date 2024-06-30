@@ -29,7 +29,7 @@ def main(argv):
      capi.create_object_pool("/test", "VolatileCascadeStoreWithStringKey", 0)
 
      # array = np.array([1.1, 2.22, 3.333, 4.4444, 5.55555], dtype=np.float32)
-     client_id = 0
+     client_id = capi.get_my_id()
      querybatch_id = 0
      key = f"/rag/emb/py_centroids_search/client{client_id}qb{querybatch_id}"
      query_list = ["hello world", "I am RAG"]

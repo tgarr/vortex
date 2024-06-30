@@ -39,6 +39,7 @@
                         "python_path":["python_udls"],
                         "module":"aggregate_generate",
                         "entry_class":"AggregateGenerateUDL",
+                        "top_clusters_count":4,
                         "top_k":4
                     }],
                 "destinations": [{}]
