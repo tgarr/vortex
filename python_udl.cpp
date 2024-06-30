@@ -689,7 +689,7 @@ private:
      *     '''
      *     emit an object to the next stage of the pipeline.
      *     key      -- (string) the key
-     *     value    -- (numpy array of any shape) the value of the object
+     *     value    -- byte value of the object
      *
      *     optional keys:
      *     version                  -- (int) the version of the emitted object
@@ -756,16 +756,18 @@ private:
                     )) {
             return nullptr;
         }
-
-        if (!PyArray_Check(value)) {
+        /*** NOTE: different from main repo, need value to be a byte object instead of numpy array object ***/
+        if (!PyBytes_Check(value)) {
             PyErr_SetString(PyExc_AssertionError,
-                    "The second argument, value, is NOT a NumPy array!");
+                    "The second argument, value, is NOT a Byte object!");
             return nullptr;
         }
-        PyArrayObject *ndarray = reinterpret_cast<PyArrayObject*>(value);
+        // PyArrayObject *ndarray = reinterpret_cast<PyArrayObject*>(value);
         /* STEP 3: Call _emit_func. */
-        uint8_t * data = reinterpret_cast<uint8_t*>(PyArray_DATA(ndarray));
-        Blob blob_wrapper(data, static_cast<std::size_t>(PyArray_NBYTES(ndarray)), true);
+        uint8_t * data = reinterpret_cast<uint8_t*>(PyBytes_AsString(value));
+        std::size_t size = static_cast<std::size_t>(PyBytes_Size(value));
+        std::cout << "At python_udl: " << key << " with size: " << size << std::endl;
+        Blob blob_wrapper(data, size, true);
 
         (*_emit_func)(std::string(key)
                      ,version

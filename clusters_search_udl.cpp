@@ -1,5 +1,6 @@
 #include <cascade/user_defined_logic_interface.hpp>
 #include <cascade/cascade_interface.hpp>
+#include <derecho/openssl/hash.hpp>
 #include <iostream>
 #include <unordered_map>
 #include <memory>
@@ -31,6 +32,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     int emb_dim = 64; // dimension of each embedding
     int top_k = 4; // number of top K embeddings to search
 
+    // openssl::Hasher sha256;
+    // bool hasher_initialized = false;
 
     /*** 
      * Helper function to fill_cluster_embs_in_cache()
@@ -160,42 +163,89 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     }
 
     /***
-     * Get the qids from the key_string
-     * The key string is formated as "client{client_id}qb{querybatch_id}{qids-topK}_cluster{cluster_id}",
-     *     where qids are the query IDs separated by '-'.
-     * Format it to "client{client_id}qb{querybatch_id}qid{qid}{topK}_cluster{cluster_id}" for each qids
+     * Format the new_keys for the search results of the queries
+     * it is formated as client{client_id}qb{querybatch_id}_cluster{cluster_id}_{hash(query)}
+     * @param new_keys the new keys to be constructed
      * @param key_string the key string of the object
+     * @param queries the queries in text
     ***/
-    inline std::vector<std::string> construct_new_keys(const std::string& key_string) {
-        std::vector<std::string> new_keys;
-        size_t prefix_pos = key_string.find("qids");
-        size_t suffix_pos = key_string.find("top");
-        if (prefix_pos == std::string::npos || suffix_pos == std::string::npos) {
-            std::cerr << "Error: qids or top not found in the key_string" << std::endl;
-            dbg_default_error("Failed to find qids or top from key: {}, at clusters_search_udl.", key_string);
-            return new_keys;
+    inline void construct_new_keys(std::vector<std::string>& new_keys,
+                                                       const std::string& key_string, 
+                                                       const std::vector<std::string>& queries) {
+        // if (!this->hasher_initialized) {
+        //     this->sha256.init();
+        //     this->hasher_initialized = true;
+        // }
+        for (const auto& query : queries) {
+            // uint8_t digest[32];
+            // const char* query_cstr = query.c_str();
+            // try {
+            //     this->sha256.hash_bytes(query_cstr, strlen(query_cstr), digest);
+            // } catch(openssl::openssl_error& ex) {
+            //     dbg_error(PersistLogger::get(), "{}:{} Unable to compute SHA256 of typename. string = {}, length = {}, OpenSSL error: {}",
+            //                     __FILE__, __func__, query_cstr, strlen(query_cstr), ex.what());
+            //     throw;
+            // }
+            // std::string new_key = key_string + "_qid";
+            // new_key.append(reinterpret_cast<const char*>(digest), 32);
+            std::string new_key = key_string + "_qid" + std::to_string(std::hash<std::string>{}(query));
+            new_keys.push_back(new_key);
         }
-        std::string new_key_prefix = key_string.substr(0, prefix_pos) + "qid";
-        std::string new_key_suffix = key_string.substr(suffix_pos);
+    }
 
-        size_t pos = key_string.find("qids");
-        if (pos == std::string::npos) {
-            return new_keys;
+    /*** 
+     * Helper function to cdpo_handler()
+    ***/
+    void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
+                                                                const std::size_t data_size,
+                                                                int32_t& nq,
+                                                                float*& query_embeddings,
+                                                                std::vector<std::string>& queries) {
+        
+        // 0. get the number of queries in the blob object
+        // TODO: direct cast
+        nq =(static_cast<int32_t>(bytes[0]) << 24) |
+                (static_cast<int32_t>(bytes[1]) << 16) |
+                (static_cast<int32_t>(bytes[2]) << 8)  |
+                (static_cast<int32_t>(bytes[3]));
+        std::cout << "Number of queries: " << nq << std::endl;
+        // 1. get the emebddings of the queries from the blob object
+        std::size_t float_array_start = 4;
+        std::size_t float_array_size = sizeof(float) * this->emb_dim * nq;
+        std::size_t float_array_end = float_array_start + float_array_size;
+        if (data_size < float_array_end) {
+            std::cerr << "Data size "<< data_size <<" is too small for the expected float array end: " << float_array_end <<"." << std::endl;
+            return;
         }
-        pos += 4;  // Skip past "qids"
-        std::string qids_str;
-        while (pos < key_string.size() && (std::isdigit(key_string[pos]) || key_string[pos] == '-')) {
-            qids_str += key_string[pos];
-            ++pos;
+        query_embeddings = const_cast<float*>(reinterpret_cast<const float*>(bytes + float_array_start));
+
+        // 2. get the queries from the blob object
+        std::size_t json_start = float_array_end;
+        if (json_start >= data_size) {
+            std::cerr << "No space left for queries data." << std::endl;
+            return;
         }
-        std::istringstream qids_stream(qids_str);
-        std::string qid;
-        while (std::getline(qids_stream, qid, '-')) {
-            if (!qid.empty()) {
-                new_keys.push_back(new_key_prefix + qid + new_key_suffix);
+        // Create a JSON string from the remainder of the bytes object
+        char* json_data = const_cast<char*>(reinterpret_cast<const char*>(bytes + json_start));
+        std::size_t json_size = data_size - json_start;
+        std::string json_string(json_data, json_size);
+
+        // Parse the JSON string using nlohmann/json
+        nlohmann::json parsed_json;
+        try {
+            parsed_json = nlohmann::json::parse(json_string);
+            if (parsed_json.is_array() && parsed_json.size() > 0 && parsed_json[0].is_string()) {
+                queries = parsed_json.get<std::vector<std::string>>();
+                std::cout << "Parsed list of strings from JSON:" << std::endl;
+                for (const auto& str : queries) {
+                    std::cout << str << std::endl;
+                }
+            } else {
+                std::cerr << "JSON data is not a list of strings." << std::endl;
             }
+        } catch (const nlohmann::json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
         }
-        return new_keys; 
     }
 
     virtual void ocdpo_handler(const node_id_t sender,
@@ -226,8 +276,11 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         auto& embs = it->second;
 
         // 2. get the query embeddings from the object
-        float* data = const_cast<float*>(reinterpret_cast<const float *>(object.blob.bytes));
-        int nq = static_cast<int>(object.blob.size / sizeof(float)) / this->emb_dim;
+
+        float* data;
+        int32_t nq;
+        std::vector<std::string> queries;
+        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,queries);
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
@@ -236,18 +289,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
         // 4. emit the result to the subsequent UDL
         // 4.1 construct new keys for all queries in this search
-        std::vector<std::string> new_keys = construct_new_keys(key_string);
-        if (new_keys.empty() || new_keys.size() < static_cast<size_t>(nq)) {
-            std::cerr << "Error: failed to construct new keys" << std::endl;
-            dbg_default_error("Failed to construct new keys from key: {}, at clusters_search_udl.", key_string);
-            return;
-        }
+        std::vector<std::string> new_keys;
+        construct_new_keys(new_keys, key_string, queries);
         for (int idx = 0; idx < nq; idx++) {
             // 4.2 construct the cluster search result of query idx
             nlohmann::json json_obj; // format it as {"emb_id1": distance1, ...}
             for (int j = 0; j < this->top_k; j++) {
-                json_obj[std::to_string(I[idx * this->top_k + j])] = D[idx * this->top_k + j];
+                json_obj[std::to_string(I[idx * this->top_k + j])] = std::to_string(cluster_id) + "-" + std::to_string(D[idx * this->top_k + j]);
             }
+            json_obj["query"] = queries[idx];
             std::string json_str = json_obj.dump();
             Blob blob(reinterpret_cast<const uint8_t*>(json_str.c_str()), json_str.size());
             // 4.3 emit the result
