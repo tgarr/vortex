@@ -14,13 +14,12 @@
 
    Generator model
 
-## Branches
-We implemented two pipeline for RAG. 
-- branch: cpp_udl. It has two C++ UDLs (centroids_search_udl, clusters_search_udl), and one Python udl (generate_udl)
-- branch: py_cpp_udl. This one contains two Python UDL (centroids_search_udl, generate_udl) and one C++ UDL (clusters_sesarch_udl).
 
 # Run
-## Commands
+## Server Commands
+This is a bare-minimal setup of cascade server. It only requires two server nodes to start the service. n0, n1. run ``` ./run.sh server ``` under the build directory of the corresponding folder starts the service.
+
+## Client Commands
 1. create object pools
 2. put embeddings
 3. run UDLs
