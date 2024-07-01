@@ -6,6 +6,7 @@ import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
 
+np.random.seed(1234)             # make reproducible
 
 OBJECT_POOLS_LIST = "setup/object_pools.list"
 
@@ -54,11 +55,12 @@ def get_embeddings(basepath, filename="centroids.pkl", d=64, num_embs=100):
     Load the embeddings from pickle files
     TODO: this is a placeholder, need to replace with real data
     '''
-    np.random.seed(1234)             # make reproducible
     xb = np.random.random((num_embs, d)).astype('float32')
     xb[:, 0] += np.arange(num_embs) / 1000.
     return xb
 
+
+    
 
 def put_initial_embeddings(capi, basepath):
     print("Putting centroids and clusters' embeddings to cascade server ...")
@@ -66,15 +68,18 @@ def put_initial_embeddings(capi, basepath):
     num_clusters = NUM_CENTROIDS 
     # 1. Put centroids'embeddings to cascade
     #  For quick test purpose, manually created two centroids objects, TODO: replace with real data
-    centroids_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=int(num_clusters/2))
-    key = "/rag/emb/centroids/0"
-    res = capi.put(key, centroids_embs.tobytes())
-    key = "/rag/emb/centroids/1"
-    res = capi.put(key, centroids_embs.tobytes())
-    if res:
-        res.get_result()
-    else:
-        print(f"Failed to put the centroids embeddings to key: {key}")
+    num_objects = 2
+    for i in range(num_objects):
+        key = f"/rag/emb/centroids/{i}"
+        centroids_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=(num_clusters//num_objects))
+        res = capi.put(key, centroids_embs.tobytes())
+        if res:
+            res.get_result()
+            print(f"Put the centroids embeddings to key: {key}")
+        else:
+            print(f"Failed to put the centroids embeddings to key: {key}")
+
+    
     print("Initialized: Put the centroids embeddings")
 
     # 2. put clusters' embeddings to cascade

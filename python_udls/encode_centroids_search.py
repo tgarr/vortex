@@ -14,7 +14,8 @@ import time
 from FlagEmbedding import BGEM3FlagModel
 import faiss    
 
-
+import warnings
+warnings.filterwarnings("ignore")
 
 
 class EncodeCentroidsSearchUDL(UserDefinedLogic):
@@ -32,8 +33,27 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           self.top_k = int(self.conf["top_k"])
           self.emb_dim = int(self.conf["emb_dim"])
           self.index = faiss.IndexFlatL2(self.emb_dim)
-          
      
+     def get_centroid_obj_keys(self, capi):
+          '''
+          Get the sorted keys for embeddings
+          Needs to be sorted, because the centroid embeddings are formed in the order of its corresponding cluster index
+          @param capi: the ServiceClientAPI object
+          @return the keys for embeddings
+          '''
+          centroids_key_prefix = "/rag/emb/centroids"
+          res = capi.list_keys_in_object_pool(centroids_key_prefix)
+          centroids_obj_keys = []
+          # Need to process all the futures, because embedding objects may hashed to different shards
+          for r in res:
+               keys = r.get_result()
+               for key in keys:
+                    if len(key) > len(centroids_key_prefix):
+                         centroids_obj_keys.append(key)
+          unique_centroids_obj_keys = list(set(centroids_obj_keys))
+          # +1 to account for / before object number, because keys are formated as "/rag/emb/centroids/0"
+          sorted_centroids_obj_keys = sorted(unique_centroids_obj_keys, key=lambda x: int(x[len(centroids_key_prefix)+1:])) 
+          return sorted_centroids_obj_keys
 
      def load_centroids_embeddings(self):
           '''
@@ -48,11 +68,9 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           (The reason not to call it at initialization, is that initialization is called upon server starts, 
           but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
           '''
-          centroids_key_prefix = "/rag/emb/centroids"
-          centroids_obj_keys = self.capi.list_keys_in_object_pool(centroids_key_prefix)[0].get_result()
-          print(f"centroids_obj_keys: {centroids_obj_keys}")
+          centroids_obj_keys = self.get_centroid_obj_keys(self.capi)
           if len(centroids_obj_keys) == 0:
-               print(f"Failed to get the centroids embeddings from key: {centroids_key_prefix}")
+               print(f"Failed to get the centroids embeddings")
                return
           for cluster_key in centroids_obj_keys:
                res = self.capi.get(cluster_key)
@@ -111,13 +129,17 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           clusters_to_queries = self.combine_common_clusters(I)
           for cluster_id, query_ids in clusters_to_queries.items():
                print(f"cluster_id: {cluster_id}, query_ids: {query_ids}")
+               if cluster_id == -1:
+                    # print error message and stop the ocdpo_handler
+                    print(f"Error: cluster_id is -1. Stopped processing of key({key}) at EncodeCentroidsSearchUDL.")
+                    return
                # 3.1 construct new key for subsequent udl based on cluster_id and query_ids
                ''' 
                Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
                Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}_cluster{cluster_id}"
                '''
                key_string = f"{key}_cluster{cluster_id}"
-               print("EncodeCentroidsSearchUDL: emitting subsequent for key({key})")
+               print(f"EncodeCentroidsSearchUDL: emitting subsequent for key({key_string})")
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
                query_embeddings_bytes = query_embeddings_for_cluster.tobytes()
