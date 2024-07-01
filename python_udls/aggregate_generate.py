@@ -44,8 +44,7 @@ class ClusterSearchResults:
           top_k_results = all_results[:self.top_k]
           return top_k_results
           
-
-
+     
 
 
 
@@ -56,26 +55,40 @@ class AggregateGenerateUDL(UserDefinedLogic):
           '''
           Constructor
           '''
-          # Aggregated query results {(client_id,query_id):{query_id: ClusterSearchResults, ...}, ...}
+          # Aggregated query results {(client_id,query_id,query_count):{query_id: ClusterSearchResults, ...}, ...}
           self.agg_query_results = {}
+          # Aggregated client batch results {(client_id, querybatch_id,query_count): {query_id: top_k_results, ...}, ...}
+          self.agg_client_batch_results = {}
           self.conf = json.loads(conf_str)
           self.top_k = int(self.conf["top_k"])
           self.top_clusters_count = int(self.conf["top_clusters_count"])
-            
+          self.capi = ServiceClientAPI()
+          
+          
 
+     def check_client_batch_finished(self, client_id, querybatch_id, query_count):
+          '''
+          Check if all queries in the client batch are finished
+          @param client_id: the client id
+          @param querybatch_id: the query batch id
+          @return True if all queries in the client batch are finished
+          '''
+          return (client_id, querybatch_id, query_count) in self.agg_client_batch_results and \
+                 len(self.agg_client_batch_results[(client_id, querybatch_id, query_count)]) == query_count
 
      def ocdpo_handler(self,**kwargs):
           key = kwargs["key"]
           blob = kwargs["blob"]
           pathname = kwargs["pathname"]
-          match = re.match(r"client(\d+)qb(\d+)_cluster(\d+)_qid(\d+)", key)
+          match = re.match(r"client(\d+)qb(\d+)qc(\d+)_cluster(\d+)_qid(\d+)", key)
           if not match:
                print(f"[AggregateGenerate] received an object with invalid key format")
                return
           client_id = int(match.group(1))
           querybatch_id = int(match.group(2))
-          cluster_id = int(match.group(3))
-          qid = int(match.group(4))
+          query_count = int(match.group(3))  # number of queries in this client request batch
+          cluster_id = int(match.group(4))
+          qid = int(match.group(5))
           
 
           # 1. parse the blob to dict
@@ -83,22 +96,32 @@ class AggregateGenerateUDL(UserDefinedLogic):
           json_str_decoded = bytes_obj.decode('utf-8')
           cluster_result = json.loads(json_str_decoded)
           query = cluster_result["query"]
-          print(f"----- query :{query}")
           
           # 2. add the cluster result to the aggregated query results
-          if (client_id, querybatch_id) not in self.agg_query_results:
-               self.agg_query_results[(client_id, querybatch_id)] = {}
-          if qid not in self.agg_query_results[(client_id, querybatch_id)]:
-               self.agg_query_results[(client_id, querybatch_id)][qid] = ClusterSearchResults(self.top_clusters_count, self.top_k)
-          self.agg_query_results[(client_id, querybatch_id)][qid].add_cluster_result(cluster_id, cluster_result)
-          
+          if (client_id, querybatch_id, query_count) not in self.agg_query_results:
+               self.agg_query_results[(client_id, querybatch_id, query_count)] = {}
+          if qid not in self.agg_query_results[(client_id, querybatch_id, query_count)]:
+               self.agg_query_results[(client_id, querybatch_id, query_count)][qid] = ClusterSearchResults(self.top_clusters_count, self.top_k)
+          self.agg_query_results[(client_id, querybatch_id,query_count)][qid].add_cluster_result(cluster_id, cluster_result)
+
           # 3. check if all results are collected
-          if self.agg_query_results[(client_id, querybatch_id)][qid].collected_all_results():
+          if self.agg_query_results[(client_id, querybatch_id, query_count)][qid].collected_all_results():
                # 4. aggregate the results
-               top_k_results = self.agg_query_results[(client_id, querybatch_id)][qid].select_top_K()
-               print(f"~~~~~~ [AggregateGenerate] client{client_id}batch{querybatch_id} \
-                      \n       query: {query} \
-                      \n       top_k_results: {top_k_results}")
+               top_k_results = self.agg_query_results[(client_id, querybatch_id, query_count)][qid].select_top_K()
+               # 5. put the aggregated results to the aggregated client batch results
+               if (client_id, querybatch_id, query_count) not in self.agg_client_batch_results:
+                    self.agg_client_batch_results[(client_id, querybatch_id, query_count)] = {}
+               self.agg_client_batch_results[(client_id, querybatch_id, query_count)][qid] = top_k_results
+               # 6. check if all queries in the client batch are finished
+               if self.check_client_batch_finished(client_id, querybatch_id, query_count):
+                    # 7. if all queries in the client batch are finished, put the aggregated client batch results to the next UDL
+                    next_key = f"client{client_id}qb{querybatch_id}"
+                    client_query_batch_result = self.agg_client_batch_results[(client_id, querybatch_id, query_count)]
+                    sorted_client_query_batch_result = {k: client_query_batch_result[k] for k in sorted(client_query_batch_result)}
+                    client_query_batch_result_json = json.dumps(sorted_client_query_batch_result)
+                    # self.capi.put(next_key, client_query_batch_result_json.encode('utf-8'))
+                    print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
+                          \n                   value: {sorted_client_query_batch_result}")
 
 
                

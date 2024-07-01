@@ -9,13 +9,13 @@ import numpy as np
 import json
 import re
 import time
-
+import warnings
+warnings.filterwarnings("ignore")
 
 from FlagEmbedding import BGEM3FlagModel
 import faiss    
 
-import warnings
-warnings.filterwarnings("ignore")
+
 
 
 class EncodeCentroidsSearchUDL(UserDefinedLogic):
@@ -127,6 +127,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           print(I[:5])                   # print top 5 query top_k neighbors
           # 3. trigger the subsequent UDL by evict the query to the top M shards according to affinity set sharding policy
           clusters_to_queries = self.combine_common_clusters(I)
+          nq = len(query_list)
           for cluster_id, query_ids in clusters_to_queries.items():
                print(f"cluster_id: {cluster_id}, query_ids: {query_ids}")
                if cluster_id == -1:
@@ -136,15 +137,16 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                # 3.1 construct new key for subsequent udl based on cluster_id and query_ids
                ''' 
                Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
-               Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}_cluster{cluster_id}"
+               Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}"
                '''
-               key_string = f"{key}_cluster{cluster_id}"
+               key_string = f"{key}qc{nq}_cluster{cluster_id}"
                print(f"EncodeCentroidsSearchUDL: emitting subsequent for key({key_string})")
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
                query_embeddings_bytes = query_embeddings_for_cluster.tobytes()
-               quries = [query_list[qid] for qid in query_ids]
-               query_list_json = json.dumps(quries)
+               # Note: constructed this way to keep the order of query_ids in query_dict
+               query_dict = {query_id: query_list[query_id] for query_id in query_ids}
+               query_list_json = json.dumps(query_dict)
                query_list_json_bytes = query_list_json.encode('utf-8')
                num_queries = len(query_ids)
                num_queries_bytes = num_queries.to_bytes(4, byteorder='big')

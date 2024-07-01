@@ -1,9 +1,9 @@
 #include <cascade/user_defined_logic_interface.hpp>
 #include <cascade/cascade_interface.hpp>
-#include <derecho/openssl/hash.hpp>
 #include <iostream>
 #include <unordered_map>
 #include <memory>
+#include <map>
 
 #include "grouped_embeddings.hpp"
 
@@ -31,9 +31,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
     int top_k = 4; // number of top K embeddings to search
-
-    // openssl::Hasher sha256;
-    // bool hasher_initialized = false;
 
     /*** 
      * Helper function to fill_cluster_embs_in_cache()
@@ -171,31 +168,16 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     /***
      * Format the new_keys for the search results of the queries
-     * it is formated as client{client_id}qb{querybatch_id}_cluster{cluster_id}_{hash(query)}
+     * it is formated as client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}_{hash(query)}
      * @param new_keys the new keys to be constructed
      * @param key_string the key string of the object
-     * @param queries the queries in text
+     * @param query_dict {query_id: query_string}
     ***/
     inline void construct_new_keys(std::vector<std::string>& new_keys,
                                                        const std::string& key_string, 
-                                                       const std::vector<std::string>& queries) {
-        // if (!this->hasher_initialized) {
-        //     this->sha256.init();
-        //     this->hasher_initialized = true;
-        // }
-        for (const auto& query : queries) {
-            // uint8_t digest[32];
-            // const char* query_cstr = query.c_str();
-            // try {
-            //     this->sha256.hash_bytes(query_cstr, strlen(query_cstr), digest);
-            // } catch(openssl::openssl_error& ex) {
-            //     dbg_error(PersistLogger::get(), "{}:{} Unable to compute SHA256 of typename. string = {}, length = {}, OpenSSL error: {}",
-            //                     __FILE__, __func__, query_cstr, strlen(query_cstr), ex.what());
-            //     throw;
-            // }
-            // std::string new_key = key_string + "_qid";
-            // new_key.append(reinterpret_cast<const char*>(digest), 32);
-            std::string new_key = key_string + "_qid" + std::to_string(std::hash<std::string>{}(query));
+                                                       const std::map<int, std::string>& query_dict) {
+        for (const auto& pair : query_dict) {
+            std::string new_key = key_string + "_qid" + std::to_string(pair.first);
             new_keys.push_back(new_key);
         }
     }
@@ -207,6 +189,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                                                 const std::size_t data_size,
                                                                 int32_t& nq,
                                                                 float*& query_embeddings,
+                                                                std::map<int, std::string>& query_dict,
                                                                 std::vector<std::string>& queries) {
         
         // 0. get the number of queries in the blob object
@@ -241,14 +224,13 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         nlohmann::json parsed_json;
         try {
             parsed_json = nlohmann::json::parse(json_string);
-            if (parsed_json.is_array() && parsed_json.size() > 0 && parsed_json[0].is_string()) {
-                queries = parsed_json.get<std::vector<std::string>>();
-                std::cout << "Parsed list of strings from JSON:" << std::endl;
-                for (const auto& str : queries) {
-                    std::cout << str << std::endl;
-                }
-            } else {
-                std::cerr << "JSON data is not a list of strings." << std::endl;
+            // Note the map must be ordered according to the order of queries, 
+            // which is how the json is constructed by encode_centroids_search_udl
+            for (json::iterator it = parsed_json.begin(); it != parsed_json.end(); ++it) {
+                int key = std::stoi(it.key());  // Convert key from string to int
+                std::string value = it.value(); // Get the value (already a string)
+                query_dict[key] = value;
+                queries.emplace_back(value);
             }
         } catch (const nlohmann::json::parse_error& e) {
             std::cerr << "JSON parse error: " << e.what() << std::endl;
@@ -291,8 +273,9 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
         float* data;
         int32_t nq;
+        std::map<int, std::string> query_dict;
         std::vector<std::string> queries;
-        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,queries);
+        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,query_dict, queries);
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
@@ -302,7 +285,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 4. emit the result to the subsequent UDL
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
-        construct_new_keys(new_keys, key_string, queries);
+        construct_new_keys(new_keys, key_string, query_dict);
         for (int idx = 0; idx < nq; idx++) {
             // 4.2 construct the cluster search result of query idx
             nlohmann::json json_obj; // format it as {"emb_id1": distance1, ...}
