@@ -104,9 +104,10 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
      *  but the data have not been put to the servers yet, this needs to be called after the clusters' embeddings data are put)
      * @param cluster_id the cluster ID to get the embeddings
      * @param typed_ctxt the context to get the service client reference
+     * @return 0 on success, -1 on failure
      * @note we load the stabled version of the cluster embeddings
     ***/
-    void fill_cluster_embs_in_cache(int cluster_id, 
+    int fill_cluster_embs_in_cache(int cluster_id, 
                                     DefaultCascadeContextType* typed_ctxt){
         bool stable = 1; 
         persistent::version_t version = CURRENT_VERSION;
@@ -118,7 +119,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         if (cluster_emb_obj_keys.empty()) {
             std::cerr << "Error: cluster" << cluster_id <<" has no cluster embeddings found in the KV store" << std::endl;
             dbg_default_error("Failed to find cluster embeddings in the KV store, at clusters_search_udl.");
-            return;
+            return -1;
         }
 
         // 1. Get the cluster embeddings from KV store in Cascade
@@ -129,12 +130,18 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         } else {
             data = multi_emb_object_retrieve(cluster_num_embs, cluster_emb_obj_keys, typed_ctxt, version ,stable);
         }
-        std::cout << "[ClustersSearchOCDPO]: num_embs=" << cluster_num_embs << std::endl;
+        if (cluster_num_embs == 0) {
+            std::cerr << "Error: cluster" << cluster_id <<" has no embeddings found in the KV store" << std::endl;
+            dbg_default_error("Failed to find cluster embeddings in the KV store, at clusters_search_udl.");
+            return -1;
+        }
+
+        std::cout << "[ClustersSearchOCDPO]: num_emb_objects=" << cluster_num_embs << std::endl;
         
         // 2. fill in the memory cache
         this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, data);
         this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
-        return;
+        return 0;
     }
 
     /***
@@ -269,7 +276,12 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 1.1. check if local cache contains the embeddings of the cluster
         auto it = this->clusters_embs.find(cluster_id);
         if (it == this->clusters_embs.end()){
-            fill_cluster_embs_in_cache(cluster_id, typed_ctxt);
+            int filled_cluster_embs = fill_cluster_embs_in_cache(cluster_id, typed_ctxt);
+            if (filled_cluster_embs == -1) {
+                std::cerr << "Error: failed to fill the cluster embeddings in cache" << std::endl;
+                dbg_default_error("Failed to fill the cluster embeddings in cache, at clusters_search_udl.");
+                return;
+            }
             it = this->clusters_embs.find(cluster_id);
         }
         // 1.2. get the embeddings of the cluster
