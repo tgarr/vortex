@@ -27,7 +27,7 @@
                         "emb_dim":1024,
                         "top_k":4
                 }],
-                "destinations": [{"/rag/generate":"trigger_put"}]
+                "destinations": [{"/rag/generate":"put"}]
             },
             {
                 "pathname": "/rag/generate",
