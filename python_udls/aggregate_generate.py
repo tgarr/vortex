@@ -55,7 +55,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           '''
           Constructor
           '''
-          # Aggregated query results {(client_id,query_id,query_count):{query_id: ClusterSearchResults, ...}, ...}
+          # Aggregated query results {(client_id,query_batch_id,query_count):{query_id: ClusterSearchResults, ...}, ...}
           self.agg_query_results = {}
           # Aggregated client batch results {(client_id, querybatch_id,query_count): {query_id: top_k_results, ...}, ...}
           self.agg_client_batch_results = {}
@@ -80,6 +80,8 @@ class AggregateGenerateUDL(UserDefinedLogic):
           key = kwargs["key"]
           blob = kwargs["blob"]
           pathname = kwargs["pathname"]
+          # TODO: rethink here, maybe shouldn't assume client key format to have client[client_id]qb[querybatch_id], 
+          #       but should start from qc.
           match = re.match(r"client(\d+)qb(\d+)qc(\d+)_cluster(\d+)_qid(\d+)", key)
           if not match:
                print(f"[AggregateGenerate] received an object with invalid key format")
@@ -115,11 +117,11 @@ class AggregateGenerateUDL(UserDefinedLogic):
                # 6. check if all queries in the client batch are finished
                if self.check_client_batch_finished(client_id, querybatch_id, query_count):
                     # 7. if all queries in the client batch are finished, put the aggregated client batch results to the next UDL
-                    next_key = f"client{client_id}qb{querybatch_id}"
+                    next_key = f"/rag/generate/client{client_id}qb{querybatch_id}_results"
                     client_query_batch_result = self.agg_client_batch_results[(client_id, querybatch_id, query_count)]
                     sorted_client_query_batch_result = {k: client_query_batch_result[k] for k in sorted(client_query_batch_result)}
                     client_query_batch_result_json = json.dumps(sorted_client_query_batch_result)
-                    # self.capi.put(next_key, client_query_batch_result_json.encode('utf-8'))
+                    self.capi.put(next_key, client_query_batch_result_json.encode('utf-8'))
                     print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
                           \n                   value: {sorted_client_query_batch_result}")
 

@@ -25,7 +25,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           '''
           self.encoder = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False, device="cpu")
           self.capi = ServiceClientAPI()
-          self.centroids_embeddings = None
+          self.centroids_embeddings = np.array([])
 
           self.num_embs = 0
 
@@ -80,7 +80,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                emb = res.get_result()['value']
                flattend_emb = np.frombuffer(emb, dtype=np.float32)
                flattend_emb = flattend_emb.reshape(-1, self.emb_dim) # FAISS PYTHON API requires to reshape to 2D array
-               if self.centroids_embeddings is None:
+               if self.centroids_embeddings.size == 0:
                     self.centroids_embeddings = flattend_emb
                else:
                     self.centroids_embeddings = np.concatenate((self.centroids_embeddings, flattend_emb), axis=0)
@@ -110,7 +110,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           pathname = kwargs["pathname"]
           message_id = kwargs["message_id"]
           # 0. load centroids' embeddings
-          if self.centroids_embeddings == None:
+          if self.centroids_embeddings.size == 0:
                self.load_centroids_embeddings()
           # 1. process the queries from blob to embeddings
           decoded_json_string = blob.tobytes().decode('utf-8')

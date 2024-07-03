@@ -27,10 +27,10 @@
                         "emb_dim":1024,
                         "top_k":4
                 }],
-                "destinations": [{"/rag/generate":"put"}]
+                "destinations": [{"/rag/generate/agg":"put"}]
             },
             {
-                "pathname": "/rag/generate",
+                "pathname": "/rag/generate/agg",
                 "shard_dispatcher_list": ["one"],
                 "user_defined_logic_list": ["6cfe8f64-3a1d-11ed-8e7e-0242ac110006"],
                 "user_defined_logic_stateful_list": ["singlethreaded"],

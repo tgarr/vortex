@@ -16,6 +16,10 @@ SUBGROUP_TYPES = {
         "TCSS": "TriggerCascadeNoStoreWithStringKey"
         }
 
+MAX_RESULT_WAIT_TIME = 10 # seconds
+RETRIEVE_WAIT_INTERVAL = 0.5 # seconds
+
+
 
 def main(argv):
 
@@ -38,6 +42,20 @@ def main(argv):
      capi.put(key, encoded_bytes)
      # capi.put("/test/hello", array.tostring())  # deprecated
      print(f"Put key:{key} \n    value:{query_list} to Cascade.")
+     result_key = "/rag/generate/" + f"client{client_id}qb{querybatch_id}_results"
+     result_generated = False
+     wait_time = 0
+     while not result_generated and wait_time < MAX_RESULT_WAIT_TIME:
+          result_future = capi.get(result_key)
+          if result_future:
+               res_dict = result_future.get_result()
+               if len(res_dict['value']) > 0:
+                    result_generated = True
+                    print(f"Got result from key:{result_key} \n    value:{res_dict}")
+          else:
+               print(f"Getting key:{result_key} with NULL result_future.")
+          time.sleep(RETRIEVE_WAIT_INTERVAL)
+          wait_time += RETRIEVE_WAIT_INTERVAL
 
      print("Done!")
 
