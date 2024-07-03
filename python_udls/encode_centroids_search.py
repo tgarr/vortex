@@ -139,7 +139,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
                Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}"
                '''
-               key_string = f"{key}qc{nq}_cluster{cluster_id}"
+               key_string = f"{key}_qc{nq}_cluster{cluster_id}"
                print(f"EncodeCentroidsSearchUDL: emitting subsequent for key({key_string})")
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]

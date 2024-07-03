@@ -17,9 +17,12 @@
 
 # Run
 ## Server Commands
-This is a bare-minimal setup of cascade server. It only requires two server nodes to start the service. n0, n1. run ``` ./run.sh server ``` under the build directory of the corresponding folder starts the service.
+In the main branch of this repo, we provide a bare-minimal setup of cascade server and client. It only requires two server nodes to start the service. n0, n1. run ``` ./run.sh server ``` under the build directory of the corresponding folder starts the service.
+
 
 ## Client Commands
+In this repo of client and server configuration, we use node n2 as client node.
+
 ### 1. create object pools
 Initialize the service by creating object pools needed for this pipeline: /rag/emb, /rag/doc, /rag/generate. The configurations of these object pools are in ```/setup/object_pool.list```
 
@@ -38,9 +41,13 @@ cluster embeddings stored in the format of /rag/emb/cluster[cluster_id]/[obj_id]
 Step1 and step2 could be done by running ``` python setup.py ``` at client node, n4.
 
 ### 3. run UDLs
-After the vector database is constructed, clients could send batch of queries to cascade service. Queries are triggered by put KV objects to its first UDL, encode_centroids_search_udl. The key prefix to trigger this udl is /rag/emb/py_centroids_search/, which defined in /cfg/dfgs.json.tmp. After the key prefix, it is required to have the client identifier and query_batch identifier attached to this key, the format is "/rag/emb/py_centroids_search/client[client_id]_qb[query_batch_id]" (e.g. /rag/emb/py_centroids_search/client5_qb0).
+After the vector database is constructed, clients could send batch of queries to cascade service. Queries are triggered by putting KV objects to its first UDL, encode_centroids_search_udl. 
 
-We wrote an example query using cascade python client API, client_query.py. One can test and run it in any client nodes, n4, n5 or n6.
+- The key prefix to trigger this udl is /rag/emb/py_centroids_search/, which defined in /cfg/dfgs.json.tmp. After the key prefix, the key could have the identifier for this batch of requests as its suffix. The recommended format is "/rag/emb/py_centroids_search/client[client_id]_qb[query_batch_id]" (e.g. /rag/emb/py_centroids_search/client5_qb0).
+
+- The value is a list of queries in bytes formats.
+
+We wrote an example query using cascade python client API, client_query.py. One can test and run it in any client nodes.
 
 
 # Docker image
