@@ -1,4 +1,5 @@
 #include <cascade/user_defined_logic_interface.hpp>
+#include <cascade/utils.hpp>
 #include <cascade/cascade_interface.hpp>
 #include <iostream>
 #include <unordered_map>
@@ -237,6 +238,24 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         }
     }
 
+    inline int parse_batch_id(const std::string& key_string) {
+        size_t pos = key_string.find("qb");
+        if (pos == std::string::npos) {
+            return -1;
+        }
+        pos += 2; 
+        // Extract the number following "qb"
+        std::string numberStr;
+        while (pos < key_string.size() && std::isdigit(key_string[pos])) {
+            numberStr += key_string[pos];
+            ++pos;
+        }
+        if (!numberStr.empty()) {
+            return std::stoi(numberStr);
+        }
+        return -1;
+    }
+
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
                                const std::string& key_string,
@@ -245,6 +264,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
         /*** TODO: this object_pool_pathname is trigger prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
+        auto my_id = typed_ctxt->get_service_client_ref().get_my_id();
         std::cout << "[Clusters search ocdpo]: I(" << worker_id << ") received an object from sender:" << sender << " with key=" << key_string  << std::endl;
         // 0. get the cluster ID
         int cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
@@ -253,17 +273,19 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
             return;
         }
-
+        int query_batch_id = parse_batch_id(key_string);
         // 1. compute knn for the corresponding cluster on this node
         // 1.1. check if local cache contains the embeddings of the cluster
         auto it = this->clusters_embs.find(cluster_id);
         if (it == this->clusters_embs.end()){
+            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START,my_id,query_batch_id,cluster_id);
             int filled_cluster_embs = fill_cluster_embs_in_cache(cluster_id, typed_ctxt);
             if (filled_cluster_embs == -1) {
                 std::cerr << "Error: failed to fill the cluster embeddings in cache" << std::endl;
                 dbg_default_error("Failed to fill the cluster embeddings in cache, at clusters_search_udl.");
                 return;
             }
+            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_END,my_id,query_batch_id,cluster_id);
             it = this->clusters_embs.find(cluster_id);
         }
         // 1.2. get the embeddings of the cluster
@@ -275,12 +297,17 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         int32_t nq;
         std::map<int, std::string> query_dict;
         std::vector<std::string> queries;
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,query_batch_id,cluster_id);
         deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,query_dict, queries);
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,my_id,query_batch_id,cluster_id);
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
         float* D = new float[this->top_k * nq];
+        /*** TODO: based on the flag use different search ***/
         embs->faiss_cpu_flat_search(nq, data, this->top_k, D, I);
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,my_id,query_batch_id,cluster_id);
+
 
         // 4. emit the result to the subsequent UDL
         // 4.1 construct new keys for all queries in this search
@@ -290,17 +317,23 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             // 4.2 construct the cluster search result of query idx
             nlohmann::json json_obj; // format it as {"emb_id1": distance1, ...}
             for (int j = 0; j < this->top_k; j++) {
-                json_obj[std::to_string(I[idx * this->top_k + j])] = std::to_string(cluster_id) + "-" + std::to_string(D[idx * this->top_k + j]);
+                json_obj[std::to_string(I[idx * this->top_k + j])] = std::to_string(D[idx * this->top_k + j]);
             }
             json_obj["query"] = queries[idx];
             std::string json_str = json_obj.dump();
             Blob blob(reinterpret_cast<const uint8_t*>(json_str.c_str()), json_str.size());
             // 4.3 emit the result
+            /*** TODO: use query_dict to get qid ***/
+            int qid = 0;
+            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,my_id,query_batch_id,qid);
             emit(new_keys[idx], EMIT_NO_VERSION_AND_TIMESTAMP , blob);
+            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,my_id,query_batch_id,qid);
             std::cout << "Emitted key: " << new_keys[idx] << ", blob: " << json_str << std::endl;
         }
         delete[] I;
         delete[] D;
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_END,my_id,query_batch_id,cluster_id);
+
         std::cout << "[Cluster search ocdpo]: FINISHED knn search for key: " << key_string << std::endl;
     }
 

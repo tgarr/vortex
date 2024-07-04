@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore")
 from FlagEmbedding import BGEM3FlagModel
 import faiss    
 
+from perf_config import *
 
 
 
@@ -25,6 +26,8 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           '''
           self.encoder = BGEM3FlagModel("BAAI/bge-m3", use_fp16=False, device="cpu")
           self.capi = ServiceClientAPI()
+          self.tl = TimestampLogger()
+          self.my_id = self.capi.get_my_id()
           self.centroids_embeddings = np.array([])
 
           self.num_embs = 0
@@ -68,6 +71,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           (The reason not to call it at initialization, is that initialization is called upon server starts, 
           but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
           '''
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_START, self.my_id, 0, 0)
           centroids_obj_keys = self.get_centroid_obj_keys(self.capi)
           if len(centroids_obj_keys) == 0:
                print(f"Failed to get the centroids embeddings")
@@ -83,10 +87,12 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                if self.centroids_embeddings.size == 0:
                     self.centroids_embeddings = flattend_emb
                else:
+                    # TODO: preallocate instead of concatenate
                     self.centroids_embeddings = np.concatenate((self.centroids_embeddings, flattend_emb), axis=0)
           print(f"loaded centroid_embeddings shape: {self.centroids_embeddings.shape}")
           self.index.add(self.centroids_embeddings)
           self.have_centroids_loaded = True
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_END, self.my_id, 0, 0)
           # array1 = np.concatenate((array1, array2), axis=0)
 
 
@@ -109,6 +115,12 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           blob = kwargs["blob"]
           pathname = kwargs["pathname"]
           message_id = kwargs["message_id"]
+          # parse message for logging purpose
+          # find "qb" position in key
+          qb_id_pos = key.find("qb") + 2
+          querybatch_id = int(key[qb_id_pos:])
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_START, self.my_id, querybatch_id, 0)
+
           # 0. load centroids' embeddings
           if self.centroids_embeddings.size == 0:
                self.load_centroids_embeddings()
@@ -116,15 +128,21 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           decoded_json_string = blob.tobytes().decode('utf-8')
           query_list = json.loads(decoded_json_string)
           print(query_list)
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_ENCODE_START, self.my_id, querybatch_id, 0)
           encode_result = self.encoder.encode(
                query_list, return_dense=True, return_sparse=False, return_colbert_vecs=False
           )
           query_embeddings = encode_result['dense_vecs']
-          query_embeddings = query_embeddings[:, :self.emb_dim]  # TODO: remove this. temporarily use this to test original faiss implementation
+          query_embeddings = query_embeddings[:, :self.emb_dim]  
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_ENCODE_END, self.my_id, querybatch_id, 0)
           print(f"shape of query embeddings: {query_embeddings.shape}")
+          
           # 2. search the centroids
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START, self.my_id, querybatch_id, 0)
           D, I = self.index.search(query_embeddings, self.top_k)     # actual search
           print(I[:5])                   # print top 5 query top_k neighbors
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END, self.my_id, querybatch_id, 0)
+       
           # 3. trigger the subsequent UDL by evict the query to the top M shards according to affinity set sharding policy
           clusters_to_queries = self.combine_common_clusters(I)
           nq = len(query_list)
@@ -139,6 +157,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                Current key_string is in the format of  "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
                Change to format of "/rag/emb/centroids_search/client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}"
                '''
+               # TODO: create a qb identifier to be used by /rag/generate affinity set
                key_string = f"{key}_qc{nq}_cluster{cluster_id}"
                print(f"EncodeCentroidsSearchUDL: emitting subsequent for key({key_string})")
                # 3.2 construct new blob for subsequent udl based on query_ids
@@ -151,7 +170,11 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                num_queries = len(query_ids)
                num_queries_bytes = num_queries.to_bytes(4, byteorder='big')
                query_embeddings_and_query_list =  num_queries_bytes + query_embeddings_bytes + query_list_json_bytes
+               self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START, self.my_id, querybatch_id, cluster_id)
                cascade_context.emit(key_string, query_embeddings_and_query_list, message_id=message_id)
+               self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END, self.my_id, querybatch_id, cluster_id)
+
+          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_END, self.my_id, querybatch_id, 0)
           print(f"EncodeCentroidsSearchUDL: emitted subsequent for key({key})")
 
      def __del__(self):

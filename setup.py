@@ -6,6 +6,8 @@ import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
 
+from perf_config import *
+
 np.random.seed(1234)             # make reproducible
 
 OBJECT_POOLS_LIST = "setup/object_pools.list"
@@ -16,10 +18,10 @@ SUBGROUP_TYPES = {
         "TCSS": "TriggerCascadeNoStoreWithStringKey"
         }
 
-EMBEDDING_DIM = 1024
-NUM_CENTROIDS = 6 # TODO: temp start with 6 clusters
-NUM_EMB_PER_CENTROIDS = 10000
-NUM_EMB_PER_OBJ = 200 # < 1MB/4KB = 250
+# EMBEDDING_DIM = 1024
+# NUM_CENTROIDS = 6 # TODO: temp start with 6 clusters
+# NUM_EMB_PER_CENTROIDS = 10000
+# NUM_EMB_PER_OBJ = 200 # < 1MB/4KB = 250
 
 
 def create_object_pool(capi, basepath):
