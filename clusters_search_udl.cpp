@@ -1,10 +1,10 @@
 #include <cascade/user_defined_logic_interface.hpp>
 #include <cascade/utils.hpp>
 #include <cascade/cascade_interface.hpp>
-#include <iostream>
-#include <unordered_map>
 #include <memory>
 #include <map>
+#include <iostream>
+#include <unordered_map>
 
 #include "grouped_embeddings.hpp"
 
@@ -185,20 +185,23 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     /*** 
      * Helper function to cdpo_handler()
+     * @param bytes the bytes object to deserialize
+     * @param data_size the size of the bytes object
+     * @param nq the number of queries in the blob object, output. Used by FAISS search.
+        type is uint32_t because in previous encode_centroids_search_udl, it is serialized from an unsigned "big" ordered int
+     * @param query_embeddings the embeddings of the queries, output. 
     ***/
     void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
-                                                                const std::size_t data_size,
-                                                                int32_t& nq,
+                                                                const std::size_t& data_size,
+                                                                uint32_t& nq,
                                                                 float*& query_embeddings,
-                                                                std::map<int, std::string>& query_dict,
-                                                                std::vector<std::string>& queries) {
+                                                                std::map<int, std::string>& query_dict) {
         
         // 0. get the number of queries in the blob object
-        // TODO: direct cast
-        nq =(static_cast<int32_t>(bytes[0]) << 24) |
-                (static_cast<int32_t>(bytes[1]) << 16) |
-                (static_cast<int32_t>(bytes[2]) << 8)  |
-                (static_cast<int32_t>(bytes[3]));
+        nq = (static_cast<uint32_t>(byte_array[0]) << 24) |
+                     (static_cast<uint32_t>(byte_array[1]) << 16) |
+                     (static_cast<uint32_t>(byte_array[2]) <<  8) |
+                     (static_cast<uint32_t>(byte_array[3]));
         std::cout << "Number of queries: " << nq << std::endl;
         // 1. get the emebddings of the queries from the blob object
         std::size_t float_array_start = 4;
@@ -225,13 +228,12 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         nlohmann::json parsed_json;
         try {
             parsed_json = nlohmann::json::parse(json_string);
-            // Note the map must be ordered according to the order of queries, 
+            // Note: the map is ordered according to the order of queries, 
             // which is how the json is constructed by encode_centroids_search_udl
             for (json::iterator it = parsed_json.begin(); it != parsed_json.end(); ++it) {
                 int key = std::stoi(it.key());  // Convert key from string to int
                 std::string value = it.value(); // Get the value (already a string)
                 query_dict[key] = value;
-                queries.emplace_back(value);
             }
         } catch (const nlohmann::json::parse_error& e) {
             std::cerr << "JSON parse error: " << e.what() << std::endl;
@@ -263,7 +265,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
-        /*** TODO: this object_pool_pathname is trigger prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
+        /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         auto my_id = typed_ctxt->get_service_client_ref().get_my_id();
         std::cout << "[Clusters search ocdpo]: I(" << worker_id << ") received an object from sender:" << sender << " with key=" << key_string  << std::endl;
         // 0. get the cluster ID
@@ -273,7 +275,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
             return;
         }
-        int query_batch_id = parse_batch_id(key_string);
+        int query_batch_id = parse_batch_id(key_string); // Logging purpose
         // 1. compute knn for the corresponding cluster on this node
         // 1.1. check if local cache contains the embeddings of the cluster
         auto it = this->clusters_embs.find(cluster_id);
@@ -294,18 +296,18 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 2. get the query embeddings from the object
 
         float* data;
-        int32_t nq;
+        uint32_t nq;
         std::map<int, std::string> query_dict;
-        std::vector<std::string> queries;
+        // std::vector<std::string> queries;
         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,query_batch_id,cluster_id);
-        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,query_dict, queries);
+        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,query_dict);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,my_id,query_batch_id,cluster_id);
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
         float* D = new float[this->top_k * nq];
         /*** TODO: based on the flag use different search ***/
-        embs->faiss_cpu_flat_search(nq, data, this->top_k, D, I);
+        embs->faiss_cpu_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,my_id,query_batch_id,cluster_id);
 
 
@@ -313,13 +315,14 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
         construct_new_keys(new_keys, key_string, query_dict);
-        for (int idx = 0; idx < nq; idx++) {
+        int idx = 0;
+        for (auto it = query_dict.begin(); it != query_dict.end(); ++it) {
             // 4.2 construct the cluster search result of query idx
             nlohmann::json json_obj; // format it as {"emb_id1": distance1, ...}
             for (int j = 0; j < this->top_k; j++) {
                 json_obj[std::to_string(I[idx * this->top_k + j])] = std::to_string(D[idx * this->top_k + j]);
             }
-            json_obj["query"] = queries[idx];
+            json_obj["query"] = it->second;
             std::string json_str = json_obj.dump();
             Blob blob(reinterpret_cast<const uint8_t*>(json_str.c_str()), json_str.size());
             // 4.3 emit the result
@@ -329,6 +332,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             emit(new_keys[idx], EMIT_NO_VERSION_AND_TIMESTAMP , blob);
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,my_id,query_batch_id,qid);
             std::cout << "Emitted key: " << new_keys[idx] << ", blob: " << json_str << std::endl;
+            idx ++;
         }
         delete[] I;
         delete[] D;

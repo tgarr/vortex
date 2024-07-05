@@ -168,7 +168,7 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                query_list_json = json.dumps(query_dict)
                query_list_json_bytes = query_list_json.encode('utf-8')
                num_queries = len(query_ids)
-               num_queries_bytes = num_queries.to_bytes(4, byteorder='big')
+               num_queries_bytes = num_queries.to_bytes(4, byteorder='big', signed=False) 
                query_embeddings_and_query_list =  num_queries_bytes + query_embeddings_bytes + query_list_json_bytes
                self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START, self.my_id, querybatch_id, cluster_id)
                cascade_context.emit(key_string, query_embeddings_and_query_list, message_id=message_id)
