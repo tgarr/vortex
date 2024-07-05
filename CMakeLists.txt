@@ -141,6 +141,8 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
         ${CMAKE_CURRENT_BINARY_DIR}/
+    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/perf_test_setup.py
+        ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/perf_test_client.py
         ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_config.py
