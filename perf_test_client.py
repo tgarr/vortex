@@ -64,7 +64,7 @@ def main(argv):
           capi.put(key, encoded_bytes)
           tl.log(LOG_TAG_QUERIES_SENDING_END,client_id,querybatch_id,0)
           if PRINT_DEBUG_MESSAGE:
-               print(f"Put queries to key:{key}, value:{query_list}")
+               print(f"Put queries to key:{key}, batch_size:{len(query_list)}")
 
           # Wait for result of this batch
           result_key = "/rag/generate/" + f"client{client_id}qb{querybatch_id}_results"
@@ -77,7 +77,7 @@ def main(argv):
                     if len(res_dict['value']) > 0:
                          result_generated = True
                          tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,0)
-                         print(f"LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED: {LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}")
+                         print(f"LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED key: {result_key}")
                          if PRINT_DEBUG_MESSAGE:
                               print(f"Got result from key:{result_key}, value:{res_dict['value']}")
                else:
@@ -85,7 +85,7 @@ def main(argv):
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
 
-          tl.flush("perf_test_client.dat")
+     tl.flush("perf_test_client.dat")
      print("Done!")
 
 if __name__ == "__main__":
