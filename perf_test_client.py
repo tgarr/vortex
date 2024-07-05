@@ -85,7 +85,7 @@ def main(argv):
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
 
-     tl.flush("perf_test_client.dat")
+     tl.flush(f"client_timestamp.dat")
      print("Done!")
 
 if __name__ == "__main__":
