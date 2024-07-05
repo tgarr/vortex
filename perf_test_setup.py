@@ -59,7 +59,7 @@ def get_embeddings(basepath, filename="centroids.pkl", d=64, num_embs=100):
 
 def break_into_chunks(num_embeddings, chunk_size):
     chunk_idxs = []
-    num_chunks = int(num_embeddings / chunk_size)
+    num_chunks = num_embeddings // chunk_size + 1 if num_embeddings % chunk_size != 0 else num_embeddings // chunk_size
     remaining_embs_num = num_embeddings
     for i in range(num_chunks):
         chunk_size = min(chunk_size, remaining_embs_num)
