@@ -48,16 +48,18 @@ def get_queries(basepath, filename="queries.pkl", batch_size=2):
      return query_list[:batch_size]
 
 
+collected_all_results = True # TODO: check in code whether all queries have received results
+
 def main(argv):
      capi = ServiceClientAPI()
      print("Connected to Cascade service ...")
      client_id = capi.get_my_id()
      tl = TimestampLogger()
 
-     for querybatch_id in range(NUM_BATCH_REQUESTS):
+     for querybatch_id in range(TOTAL_BATCH_COUNT):
           # Send batch of queries to Cascade service
           key = f"/rag/emb/py_centroids_search/client{client_id}qb{querybatch_id}"
-          query_list = get_queries(BASE_PATH, QUERY_PICKLE_FILE, CLIENT_BATCH_SIZE)
+          query_list = get_queries(BASE_PATH, QUERY_PICKLE_FILE, QUERY_PER_BATCH)
           json_string = json.dumps(query_list)
           encoded_bytes = json_string.encode('utf-8')
           tl.log(LOG_TAG_QUERIES_SENDING_START,client_id,querybatch_id,0)
@@ -78,6 +80,7 @@ def main(argv):
                          result_generated = True
                          tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,0)
                          if PRINT_DEBUG_MESSAGE:
+                              # result dictionary format["query_id": (float(distance), int(cluster_id), int(emb_id)), "query_id":(...) ... ]
                               print(f"Got result from key:{result_key}, value:{res_dict['value']}")
                else:
                     if PRINT_DEBUG_MESSAGE:
@@ -86,6 +89,16 @@ def main(argv):
                wait_time += RETRIEVE_WAIT_INTERVAL
 
      tl.flush(f"client_timestamp.dat")
+
+     # notify all nodes to flush logs
+     # TODO: read it from object_pool.list to send this notification to both /rag/emb and /rag/generate object pool's subgroup's shards
+     subgroup_type = SUBGROUP_TYPES["VCSS"]
+     subgroup_index = 0
+     num_shards = len(capi.get_subgroup_members(subgroup_type,subgroup_index))
+     for i in range(num_shards):
+          shard_index = i
+          capi.put("/rag/flush/notify", b"",subgroup_type=subgroup_type,subgroup_index=subgroup_index,shard_index=shard_index)
+
      print("Done!")
 
 if __name__ == "__main__":

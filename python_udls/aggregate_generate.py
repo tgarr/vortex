@@ -131,7 +131,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           if PRINT_DEBUG_MESSAGE == 1:
                print(f"[AGGUDL]: query_batch_key: {query_batch_key}, query_batch_id:{query_batch_key[qb_index+2:]}")
           query_batch_id = int(query_batch_key[qb_index+2:]) #TODO: double check if there are other
-          qb_qid = query_batch_id * 1000 * CLIENT_BATCH_SIZE + qid 
+          qb_qid = query_batch_id * 1000 * QUERY_PER_BATCH + qid 
           self.tl.log(LOG_TAG_AGG_UDL_START, self.my_id, qb_qid, cluster_id)
           
 
@@ -171,9 +171,6 @@ class AggregateGenerateUDL(UserDefinedLogic):
                     print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
                               \n                   value: {sorted_client_query_batch_result}")
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, self.my_id, query_batch_id, 0)
-               # TODO: figure out a better way to flush the logs
-               if query_batch_id == NUM_BATCH_REQUESTS - 1:
-                    self.tl.flush("udls_timestamp.dat")
           self.tl.log(LOG_TAG_AGG_UDL_END, self.my_id, qb_qid, cluster_id)
           
 

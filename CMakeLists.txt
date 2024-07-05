@@ -137,6 +137,8 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/setup
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/python_udls
         ${CMAKE_CURRENT_BINARY_DIR}/python_udls
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/perf_data
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
@@ -189,6 +191,12 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/python_udls
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/perf_data
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/perf_data
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_data
     # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
     #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/python_udls
     # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
