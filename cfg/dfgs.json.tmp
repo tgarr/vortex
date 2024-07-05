@@ -25,7 +25,8 @@
                 "user_defined_logic_config_list": [
                 {
                         "emb_dim":1024,
-                        "top_k":4
+                        "top_k":4,
+                        "faiss_search_type":0
                 }],
                 "destinations": [{"/rag/generate/agg":"put"}]
             },

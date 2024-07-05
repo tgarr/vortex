@@ -47,8 +47,11 @@ After the vector database is constructed, clients could send batch of queries to
 
 - The value is a list of queries in bytes formats.
 
-We wrote an example query using cascade python client API, client_query.py. One can test and run it in any client nodes.
+We wrote an example query using cascade python client API, ```client_query.py```. One can test and run it in any client nodes.
 
+
+### 4. Performance test
+For performance testing, we created client side test scripts. ```perf_test_setup.py``` (for initialize the vector database) and ```perf_test_client.py```(for putting queries). The configuration of the test is defined in ```config.h.in```
 
 # Docker image
 We have built a docker image that have nvcc and cascade,derecho built setup. You can pull from the docker image and run it on your environment.
