@@ -76,6 +76,9 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           if len(centroids_obj_keys) == 0:
                print(f"Failed to get the centroids embeddings")
                return
+          pre_alloc_size = len(centroids_obj_keys) * NUM_EMB_PER_OBJ
+          allocated_size = 0
+          self.centroids_embeddings = np.empty((pre_alloc_size, self.emb_dim), dtype=np.float32)
           for cluster_key in centroids_obj_keys:
                res = self.capi.get(cluster_key)
                if not res:
@@ -84,11 +87,10 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                emb = res.get_result()['value']
                flattend_emb = np.frombuffer(emb, dtype=np.float32)
                flattend_emb = flattend_emb.reshape(-1, self.emb_dim) # FAISS PYTHON API requires to reshape to 2D array
-               if self.centroids_embeddings.size == 0:
-                    self.centroids_embeddings = flattend_emb
-               else:
-                    # TODO: preallocate instead of concatenate
-                    self.centroids_embeddings = np.concatenate((self.centroids_embeddings, flattend_emb), axis=0)
+               end_idx = allocated_size + flattend_emb.shape[0]
+               self.centroids_embeddings[allocated_size:end_idx, :] = flattend_emb
+               allocated_size = end_idx
+          self.centroids_embeddings = self.centroids_embeddings[:allocated_size]
           if PRINT_DEBUG_MESSAGE == 1:
                print(f"loaded centroid_embeddings shape: {self.centroids_embeddings.shape}")
           self.index.add(self.centroids_embeddings)
