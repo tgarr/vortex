@@ -77,11 +77,11 @@ def main(argv):
                     if len(res_dict['value']) > 0:
                          result_generated = True
                          tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,0)
-                         print(f"LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED key: {result_key}")
                          if PRINT_DEBUG_MESSAGE:
                               print(f"Got result from key:{result_key}, value:{res_dict['value']}")
                else:
-                    print(f"Getting key:{result_key} with NULL result_future.")
+                    if PRINT_DEBUG_MESSAGE:
+                         print(f"Getting key:{result_key} with NULL result_future.")
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
 

@@ -40,6 +40,8 @@ target_include_directories(python_udl PRIVATE
 )
 target_link_libraries(python_udl cascade Python3::Python Python3::NumPy)
 
+# printout mode
+set(PRINT_DEBUG_MESSAGE 0)
 
 # Client log tags
 set(LOG_TAG_QUERIES_SENDING_START 10000)
@@ -111,6 +113,7 @@ target_include_directories(clusters_search_udl PRIVATE
 target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
 
 target_compile_definitions(clusters_search_udl PRIVATE
+    PRINT_DEBUG_MESSAGE=${PRINT_DEBUG_MESSAGE}
     LOG_CLUSTER_SEARCH_UDL_START=${LOG_CLUSTER_SEARCH_UDL_START}
     LOG_CLUSTER_SEARCH_UDL_LOADEMB_START=${LOG_CLUSTER_SEARCH_UDL_LOADEMB_START}
     LOG_CLUSTER_SEARCH_UDL_LOADEMB_END=${LOG_CLUSTER_SEARCH_UDL_LOADEMB_END}
@@ -176,6 +179,8 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/client_query.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test_client.py
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test_client.py
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test_setup.py
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test_setup.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls

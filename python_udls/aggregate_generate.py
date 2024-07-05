@@ -128,7 +128,8 @@ class AggregateGenerateUDL(UserDefinedLogic):
           qid = int(match.group(3))
 
           qb_index = query_batch_key.find("qb")
-          print(f"[AGGUDL]: query_batch_key: {query_batch_key}, query_batch_id:{query_batch_key[qb_index+2:]}")
+          if PRINT_DEBUG_MESSAGE == 1:
+               print(f"[AGGUDL]: query_batch_key: {query_batch_key}, query_batch_id:{query_batch_key[qb_index+2:]}")
           query_batch_id = int(query_batch_key[qb_index+2:]) #TODO: double check if there are other
           qb_qid = query_batch_id * 1000 * CLIENT_BATCH_SIZE + qid 
           self.tl.log(LOG_TAG_AGG_UDL_START, self.my_id, qb_qid, cluster_id)
@@ -166,8 +167,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
                # 3.2 save the result as KV object in cascade to be retrieved by client
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, self.my_id, query_batch_id, 0)
                self.capi.put(next_key, client_query_batch_result_json.encode('utf-8'))
-               print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
-                         \n                   value: {sorted_client_query_batch_result}")
+               if PRINT_DEBUG_MESSAGE == 1:
+                    print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
+                              \n                   value: {sorted_client_query_batch_result}")
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, self.my_id, query_batch_id, 0)
           
           self.tl.log(LOG_TAG_AGG_UDL_END, self.my_id, qb_qid, cluster_id)

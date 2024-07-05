@@ -22,7 +22,7 @@ RETRIEVE_WAIT_INTERVAL = 0.5 # seconds
 '''
 Configurations for debugging
 '''
-PRINT_DEBUG_MESSAGE = True
+PRINT_DEBUG_MESSAGE=@PRINT_DEBUG_MESSAGE@
 
 
 '''

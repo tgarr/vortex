@@ -32,6 +32,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
     int top_k = 4; // number of top K embeddings to search
+    int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
 
     /*** 
      * Helper function to fill_cluster_embs_in_cache()
@@ -133,12 +134,22 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to find cluster embeddings in the KV store, at clusters_search_udl.");
             return -1;
         }
-
-        std::cout << "[ClustersSearchOCDPO]: num_emb_objects=" << cluster_num_embs << std::endl;
+        if (PRINT_DEBUG_MESSAGE == 1)
+            std::cout << "[ClustersSearchOCDPO]: num_emb_objects=" << cluster_num_embs << std::endl;
         
         // 2. fill in the memory cache
         this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, data);
-        this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
+        if (this->faiss_search_type == 0){
+            this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
+        } else if (this->faiss_search_type == 1){
+            this->clusters_embs[cluster_id]->initialize_gpu_flat_search(); // use GPU search in ocdpo search
+        } else if (this->faiss_search_type == 2){
+            this->clusters_embs[cluster_id]->initialize_gpu_ivf_flat_search(); // use GPU IVF search in ocdpo search
+        } else {
+            std::cerr << "Error: faiss_search_type not supported" << std::endl;
+            dbg_default_error("Failed to initialize faiss search type, at clusters_search_udl.");
+            return -1;
+        }
         return 0;
     }
 
@@ -198,11 +209,12 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                                                 std::map<int, std::string>& query_dict) {
         
         // 0. get the number of queries in the blob object
-        nq = (static_cast<uint32_t>(byte_array[0]) << 24) |
-                     (static_cast<uint32_t>(byte_array[1]) << 16) |
-                     (static_cast<uint32_t>(byte_array[2]) <<  8) |
-                     (static_cast<uint32_t>(byte_array[3]));
-        std::cout << "Number of queries: " << nq << std::endl;
+        nq = (static_cast<uint32_t>(bytes[0]) << 24) |
+                     (static_cast<uint32_t>(bytes[1]) << 16) |
+                     (static_cast<uint32_t>(bytes[2]) <<  8) |
+                     (static_cast<uint32_t>(bytes[3]));
+        if (PRINT_DEBUG_MESSAGE == 1)
+            std::cout << "Number of queries: " << nq << std::endl;
         // 1. get the emebddings of the queries from the blob object
         std::size_t float_array_start = 4;
         std::size_t float_array_size = sizeof(float) * this->emb_dim * nq;
@@ -267,7 +279,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                uint32_t worker_id) override {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         auto my_id = typed_ctxt->get_service_client_ref().get_my_id();
-        std::cout << "[Clusters search ocdpo]: I(" << worker_id << ") received an object from sender:" << sender << " with key=" << key_string  << std::endl;
+        if (PRINT_DEBUG_MESSAGE == 1)
+            std::cout << "[Clusters search ocdpo]: I(" << worker_id << ") received an object from sender:" << sender << " with key=" << key_string  << std::endl;
         // 0. get the cluster ID
         int cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
         if (cluster_id == -1) {
@@ -306,8 +319,17 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
         float* D = new float[this->top_k * nq];
-        /*** TODO: based on the flag use different search ***/
-        embs->faiss_cpu_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
+        if (this->faiss_search_type == 0)
+            embs->faiss_cpu_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
+        else if (this->faiss_search_type == 1)
+            embs->faiss_gpu_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
+        else if (this->faiss_search_type == 2)
+            embs->faiss_gpu_ivf_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
+        else {
+            std::cerr << "Error: faiss_search_type not supported" << std::endl;
+            dbg_default_error("Failed to search the top K embeddings, at clusters_search_udl.");
+            return;
+        }
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,my_id,query_batch_id,cluster_id);
 
 
@@ -331,14 +353,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,my_id,query_batch_id,qid);
             emit(new_keys[idx], EMIT_NO_VERSION_AND_TIMESTAMP , blob);
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,my_id,query_batch_id,qid);
-            std::cout << "Emitted key: " << new_keys[idx] << ", blob: " << json_str << std::endl;
+            if (PRINT_DEBUG_MESSAGE == 1)
+                std::cout << "Emitted key: " << new_keys[idx] << ", blob: " << json_str << std::endl;
             idx ++;
         }
         delete[] I;
         delete[] D;
         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_END,my_id,query_batch_id,cluster_id);
-
-        std::cout << "[Cluster search ocdpo]: FINISHED knn search for key: " << key_string << std::endl;
+        if (PRINT_DEBUG_MESSAGE == 1)
+            std::cout << "[Cluster search ocdpo]: FINISHED knn search for key: " << key_string << std::endl;
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
@@ -360,6 +383,9 @@ public:
             }
             if (config.contains("top_k")) {
                 this->top_k = config["top_k"].get<int>();
+            }
+            if (config.contains("faiss_search_type")) {
+                this->faiss_search_type = config["faiss_search_type"].get<int>();
             }
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;

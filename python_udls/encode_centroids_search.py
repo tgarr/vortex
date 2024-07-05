@@ -89,7 +89,8 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                else:
                     # TODO: preallocate instead of concatenate
                     self.centroids_embeddings = np.concatenate((self.centroids_embeddings, flattend_emb), axis=0)
-          print(f"loaded centroid_embeddings shape: {self.centroids_embeddings.shape}")
+          if PRINT_DEBUG_MESSAGE == 1:
+               print(f"loaded centroid_embeddings shape: {self.centroids_embeddings.shape}")
           self.index.add(self.centroids_embeddings)
           self.have_centroids_loaded = True
           self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_END, self.my_id, 0, 0)
@@ -127,7 +128,6 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           # 1. process the queries from blob to embeddings
           decoded_json_string = blob.tobytes().decode('utf-8')
           query_list = json.loads(decoded_json_string)
-          print(query_list)
           self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_ENCODE_START, self.my_id, querybatch_id, 0)
           encode_result = self.encoder.encode(
                query_list, return_dense=True, return_sparse=False, return_colbert_vecs=False
@@ -135,19 +135,18 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           query_embeddings = encode_result['dense_vecs']
           query_embeddings = query_embeddings[:, :self.emb_dim]  
           self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_ENCODE_END, self.my_id, querybatch_id, 0)
-          print(f"shape of query embeddings: {query_embeddings.shape}")
           
           # 2. search the centroids
           self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START, self.my_id, querybatch_id, 0)
           D, I = self.index.search(query_embeddings, self.top_k)     # actual search
-          print(I[:5])                   # print top 5 query top_k neighbors
           self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END, self.my_id, querybatch_id, 0)
        
           # 3. trigger the subsequent UDL by evict the query to the top M shards according to affinity set sharding policy
           clusters_to_queries = self.combine_common_clusters(I)
           nq = len(query_list)
           for cluster_id, query_ids in clusters_to_queries.items():
-               print(f"cluster_id: {cluster_id}, query_ids: {query_ids}")
+               if PRINT_DEBUG_MESSAGE == 1:
+                    print(f"cluster_id: {cluster_id}, query_ids: {query_ids}")
                if cluster_id == -1:
                     # print error message and stop the ocdpo_handler
                     print(f"Error: cluster_id is -1. Stopped processing of key({key}) at EncodeCentroidsSearchUDL.")
@@ -159,7 +158,8 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                '''
                # TODO: create a qb identifier to be used by /rag/generate affinity set
                key_string = f"{key}_qc{nq}_cluster{cluster_id}"
-               print(f"EncodeCentroidsSearchUDL: emitting subsequent for key({key_string})")
+               if PRINT_DEBUG_MESSAGE == 1:
+                    print(f"EncodeCentroidsSearchUDL: emitting subsequent for key({key_string})")
                # 3.2 construct new blob for subsequent udl based on query_ids
                query_embeddings_for_cluster = query_embeddings[query_ids]
                query_embeddings_bytes = query_embeddings_for_cluster.tobytes()
@@ -175,7 +175,8 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END, self.my_id, querybatch_id, cluster_id)
 
           self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_UDL_END, self.my_id, querybatch_id, 0)
-          print(f"EncodeCentroidsSearchUDL: emitted subsequent for key({key})")
+          if PRINT_DEBUG_MESSAGE == 1:
+               print(f"EncodeCentroidsSearchUDL: emitted subsequent for key({key})")
 
      def __del__(self):
           pass
