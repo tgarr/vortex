@@ -14,7 +14,7 @@
                         "module":"encode_centroids_search",
                         "entry_class":"EncodeCentroidsSearchUDL",
                         "emb_dim":1024,
-                        "top_k":4
+                        "top_k":2
                     }],
                 "destinations": [{"/rag/emb/clusters_search":"put"}]
             },
@@ -25,7 +25,7 @@
                 "user_defined_logic_config_list": [
                 {
                         "emb_dim":1024,
-                        "top_k":4,
+                        "top_k":3,
                         "faiss_search_type":0
                 }],
                 "destinations": [{"/rag/generate/agg":"put"}]
@@ -40,7 +40,7 @@
                         "python_path":["python_udls"],
                         "module":"aggregate_generate",
                         "entry_class":"AggregateGenerateUDL",
-                        "top_clusters_count":4,
+                        "top_clusters_count":2,
                         "top_k":4
                     }],
                 "destinations": [{}]

@@ -2,6 +2,7 @@
 
 import numpy as np
 import os
+import pickle
 import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
@@ -32,29 +33,35 @@ def create_object_pool(capi, basepath):
             if len(fields) >= 4:
                 affinity_set_regex = fields[3].strip()
                 print(f"AFFINITY: {pool_path} {affinity_set_regex}")
-                res = capi.create_object_pool(pool_path,SUBGROUP_TYPES[subgroup_type],subgroup_index,affinity_set_regex=affinity_set_regex)
+                res = capi.create_object_pool(pool_path,SUBGROUP_TYPES[subgroup_type],
+                                              subgroup_index,
+                                              affinity_set_regex=affinity_set_regex)
                 if res:
                     res.get_result()
                 else:
                     print(f"Failed to create the object pool: {pool_path}")
+                    exit(1)
             else:
                 print(f"  {pool_path} {subgroup_type} {subgroup_index}")
-                res = capi.create_object_pool(pool_path,SUBGROUP_TYPES[subgroup_type],subgroup_index)
+                res = capi.create_object_pool(pool_path,
+                                              SUBGROUP_TYPES[subgroup_type],
+                                              subgroup_index)
                 if res:
                     res.get_result()
                 else:
                     print(f"Failed to create the object pool: {pool_path}")
-            # time.sleep(0.5)
+                    exit(1)
 
 
-def get_embeddings(basepath, filename="centroids.pkl", d=64, num_embs=100):
+def get_embeddings(basepath, filename, d=1024):
     '''
-    Load the embeddings from pickle files
-    TODO: this is a placeholder, need to replace with real data
+    Load the embeddings from a pickle file.
     '''
-    xb = np.random.random((num_embs, d)).astype('float32')
-    xb[:, 0] += np.arange(num_embs) / 1000.
-    return xb
+    fpath = os.path.join(basepath, filename)
+    with open(fpath, 'rb') as file:
+        data = pickle.load(file)
+    assert(data.shape[1] == d)
+    return data
 
 
 def break_into_chunks(num_embeddings, chunk_size):
@@ -70,30 +77,30 @@ def break_into_chunks(num_embeddings, chunk_size):
     return chunk_idxs
 
     
-
 def put_initial_embeddings(capi, basepath):
     print("Putting centroids and clusters' embeddings to cascade server ...")
-    fpath = os.path.join(basepath,OBJECT_POOLS_LIST)
-    # 1. Put centroids'embeddings to cascade
+    # 1. Put centroids'embeddings to cascade.
+    centroid_file_name = 'validate_first_100_centroids.pickle'
     centroids_chunk_idx = break_into_chunks(NUM_CENTROIDS, NUM_EMB_PER_OBJ)
-    #  TODO: replace with real data
-    centroids_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=NUM_CENTROIDS)
+    print(f"NUM_CENTROIDS is {NUM_CENTROIDS}")
+    centroids_embs = get_embeddings(basepath, centroid_file_name, EMBEDDING_DIM)
     for i, (start_idx, end_idx) in enumerate(centroids_chunk_idx):
         key = f"/rag/emb/centroids/{i}"
         centroids_embs_chunk = centroids_embs[start_idx:end_idx]
         res = capi.put(key, centroids_embs_chunk.tobytes())
         if res:
             res.get_result()
-            print(f"Put the centroids embeddings to key: {key}")
+            print(f"Put the centroids embeddings {start_idx}:{end_idx} to key: {key}")
         else:
             print(f"Failed to put the centroids embeddings to key: {key}")
-
-    
+            exit(1)
     print("Initialized: Put the centroids embeddings")
 
-    # 2. put clusters' embeddings to cascade
-    for cluster_id in range(NUM_CENTROIDS):
-        cluster_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=NUM_EMB_PER_CENTROIDS)
+    # 2. Put clusters' embeddings to cascade.
+    centroid_count = centroids_embs.shape[0]
+    cluster_file_name_list = [f'validate_first_100_ebd_doc_{count}.pickle' for count in range(centroid_count)]
+    for cluster_id, cluster_file_name in enumerate(cluster_file_name_list):
+        cluster_embs = get_embeddings(basepath, cluster_file_name, EMBEDDING_DIM)
         cluster_chunk_idx = break_into_chunks(NUM_EMB_PER_CENTROIDS, NUM_EMB_PER_OBJ)
         for i, (start_idx, end_idx) in enumerate(cluster_chunk_idx):
             key = f"/rag/emb/cluster{cluster_id}/{i}"
@@ -103,22 +110,17 @@ def put_initial_embeddings(capi, basepath):
                 res.get_result()
             else:
                 print(f"Failed to put the cluster embeddings to key: {key}")
+                exit(1)
     print(f"Initialized: Put the clusters embeddings")
 
 
 def main(argv):
-
     print("Connecting to Cascade service ...")
     capi = ServiceClientAPI()
-    #basepath = os.path.dirname(argv[0])
-    basepath = "."
-
-    create_object_pool(capi, basepath)
-
-    put_initial_embeddings(capi, basepath)
-
+    create_object_pool(capi, "./")
+    put_initial_embeddings(capi, "./perf_data/miniset/")
     print("Done!")
+
 
 if __name__ == "__main__":
     main(sys.argv)
-

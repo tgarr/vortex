@@ -5,7 +5,7 @@ EMBEDDING_DIM = 1024
 '''
 Configurations for offline vector database construction
 '''
-NUM_CENTROIDS = 6
+NUM_CENTROIDS = 3
 NUM_EMB_PER_CENTROIDS = 10000
 NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
 USE_WHICH_FAISE_SAERCH = 0 # 0: cpu_flat, 1: gpu_flat, 2: gpu_ivf_flat, 3: gpu_ivf_pq

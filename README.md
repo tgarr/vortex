@@ -16,6 +16,12 @@
 
 
 # Run
+
+
+## Download Data
+```cd perf_data; ./download_testset.sh```
+
+
 ## Server Commands
 In the main branch of this repo, we provide a bare-minimal setup of cascade server and client. It only requires two server nodes to start the service. n0, n1. run ``` ./run.sh server ``` under the build directory of the corresponding folder starts the service.
 

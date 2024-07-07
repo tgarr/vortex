@@ -19,7 +19,7 @@ SUBGROUP_TYPES = {
         }
 
 # EMBEDDING_DIM = 1024
-# NUM_CENTROIDS = 6 # TODO: temp start with 6 clusters
+# NUM_CENTROIDS = 3 # TODO: temp start with 3 clusters
 # NUM_EMB_PER_CENTROIDS = 10000
 # NUM_EMB_PER_OBJ = 200 # < 1MB/4KB = 250
 

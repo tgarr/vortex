@@ -8,14 +8,16 @@ import heapq
 import io
 import numpy as np
 import json
+import pickle
 import re
 import time
 from perf_config import *
 
 
+
 # Class to store the cluster search results for each query
 class ClusterSearchResults:
-     def __init__(self, cluster_counts, top_k):
+     def __init__(self, cluster_counts, top_k, query_text):
           '''
           Constructor
           @param cluster_counts: the total number of clusters this query is searching
@@ -27,7 +29,7 @@ class ClusterSearchResults:
           self.cluster_results = {}
           self.collected_all_results = False  # true if all the selected clusters results are collected
           self.agg_top_k_res = None
-          self.query_text = None
+          self.query_text = query_text
           
      def select_top_k(self):
           '''
@@ -57,9 +59,6 @@ class ClusterSearchResults:
                self.collected_all_results = True
                
 
-
-
-
 # TODO: this implementation has a lot of copies for small objects (query results), 
 #       could be optimized if implemented in C++. But may not be the bottleneck
 class AggregateGenerateUDL(UserDefinedLogic):
@@ -77,9 +76,12 @@ class AggregateGenerateUDL(UserDefinedLogic):
           self.capi = ServiceClientAPI()
           self.my_id = self.capi.get_my_id()
           self.tl = TimestampLogger()
+          self.doc_file_name = './perf_data/miniset/doc_list.pickle'
+          self.answer_mapping_file = './perf_data/miniset/answer_mapping.pickle'
+          self.doc_list = None
+          self.answer_mapping = None
           
           
-
      def check_client_batch_finished(self, query_batch_key, query_count):
           '''
           Check if all queries in the client batch are finished
@@ -99,11 +101,63 @@ class AggregateGenerateUDL(UserDefinedLogic):
           @param query_batch_key: the identification key for this batch of queries from a client
           @param query_count: the number of queries in this batch
           @return the formatted client batch result
+          {
+               qid: {
+                    'doc_idx': [(distance, centroids_id, embedding_id), ...],
+                    'query_text': query in natural language. 
+                    }
+               ...
+          }
           '''
           client_query_batch_result = {}
           for qid in range(query_count):
-               client_query_batch_result[qid] = self.cluster_search_res[(query_batch_key, query_count)][qid].agg_top_k_res
+               client_query_batch_result[qid] = \
+                    {'doc_idx': self.cluster_search_res[(query_batch_key, query_count)][qid].agg_top_k_res,
+                     'query_text': self.cluster_search_res[(query_batch_key, query_count)][qid].query_text
+                    }
           return client_query_batch_result
+     
+     
+     def _get_doc(self, cluster_id, ebd_id):
+          """Helper method to get a piece of document in natural language.
+          @input cluster_id: The id of the KNN cluster where the document falls in.
+          @input ebd_id: The id of the document within the cluster.
+          @return: The document string in natural language.
+          """
+          if self.answer_mapping is None:
+               with open(self.answer_mapping_file, "rb") as file:
+                    self.answer_mapping = pickle.load(file)
+          if self.doc_list is None:
+               with open(self.doc_file_name, 'rb') as file:
+                    self.doc_list = pickle.load(file)
+          return self.doc_list[self.answer_mapping[cluster_id][ebd_id]]
+          
+
+     def retrieve_documents(self, qury_result):
+          """
+          @input query_result
+          {
+               qid: {
+                    'doc_idx': [(distance, centroids_id, embedding_id), ...],
+                    'query_text': query in natural language. 
+                    }    
+               ...
+          }
+          @return all in natural language
+          {
+               query_text : [document_1, document_2, ...]
+               ...
+          }
+          """     
+
+          res = dict()
+          for _, query_dict in qury_result.items():
+               doc_list = [None] * len(query_dict['doc_idx'])
+               query_text = query_dict['query_text']
+               for idx, doc in enumerate(query_dict['doc_idx']):
+                    doc_list[idx] = self._get_doc(doc[1], doc[2])
+               res[query_text] = doc_list
+          return res
 
 
      def ocdpo_handler(self,**kwargs):
@@ -129,7 +183,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
 
           qb_index = query_batch_key.find("qb")
           if PRINT_DEBUG_MESSAGE == 1:
-               print(f"[AGGUDL]: query_batch_key: {query_batch_key}, query_batch_id:{query_batch_key[qb_index+2:]}")
+               print(f"[AGGUDL]: query_batch_key: {query_batch_key}, \
+                     query_batch_id:{query_batch_key[qb_index+2:]} \
+                     qid: {qid}.")
           query_batch_id = int(query_batch_key[qb_index+2:]) #TODO: double check if there are other
           qb_qid = query_batch_id * 1000 * QUERY_PER_BATCH + qid 
           self.tl.log(LOG_TAG_AGG_UDL_START, self.my_id, qb_qid, cluster_id)
@@ -139,13 +195,14 @@ class AggregateGenerateUDL(UserDefinedLogic):
           bytes_obj = blob.tobytes()
           json_str_decoded = bytes_obj.decode('utf-8')
           cluster_result = json.loads(json_str_decoded)
-          query = cluster_result["query"]
+          query_text = cluster_result["query"]
           
           # 2. add the cluster result to the aggregated query results
           if (query_batch_key, query_count) not in self.cluster_search_res:
                self.cluster_search_res[(query_batch_key, query_count)] = {}
           if qid not in self.cluster_search_res[(query_batch_key, query_count)]:
-               self.cluster_search_res[(query_batch_key, query_count)][qid] = ClusterSearchResults(self.top_clusters_count, self.top_k)
+               self.cluster_search_res[(query_batch_key, query_count)][qid] =\
+                    ClusterSearchResults(self.top_clusters_count, self.top_k, query_text)
           self.cluster_search_res[(query_batch_key,query_count)][qid].add_cluster_result(cluster_id, cluster_result)
           if not self.cluster_search_res[(query_batch_key,query_count)][qid].collected_all_results:
                self.tl.log(LOG_TAG_AGG_UDL_END, self.my_id, qb_qid, cluster_id)
@@ -163,18 +220,18 @@ class AggregateGenerateUDL(UserDefinedLogic):
                next_key = f"/rag/generate/{query_batch_key}_results"
                client_query_batch_result = self.format_client_batch_result(query_batch_key, query_count)
                sorted_client_query_batch_result = {k: client_query_batch_result[k] for k in sorted(client_query_batch_result)}
+               print(f"Yifan:\n {sorted_client_query_batch_result}")
+               sorted_client_query_batch_result = self.retrieve_documents(sorted_client_query_batch_result)
                client_query_batch_result_json = json.dumps(sorted_client_query_batch_result)
                # 3.2 save the result as KV object in cascade to be retrieved by client
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, self.my_id, query_batch_id, 0)
                self.capi.put(next_key, client_query_batch_result_json.encode('utf-8'))
                if PRINT_DEBUG_MESSAGE == 1:
                     print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
-                              \n                   value: {sorted_client_query_batch_result}")
+                              \n                   value: {client_query_batch_result_json}")
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, self.my_id, query_batch_id, 0)
           self.tl.log(LOG_TAG_AGG_UDL_END, self.my_id, qb_qid, cluster_id)
           
-
-               
 
      def __del__(self):
           pass
