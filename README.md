@@ -8,11 +8,16 @@
    Python support needs to be built for Python centroids_search_udl
 2. cascade : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223
 3. cascade Python API : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223/src/service/python
-4. model dependencies:
+4. Encoder model:
 
    BGE-M3: https://github.com/FlagOpen/FlagEmbedding 
 
-   Generator model
+5. Generator model:
+
+   Meta Llama3: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct
+
+   In order to use the huggingface model, first request access via above link to Llama3, then do
+```huggingface-cli login``` using your own token [huggingface user page: settings ==> access tokens(Read access)]
 
 
 # Run

@@ -41,7 +41,7 @@
                         "module":"aggregate_generate",
                         "entry_class":"AggregateGenerateUDL",
                         "top_clusters_count":2,
-                        "top_k":4
+                        "top_k":2
                     }],
                 "destinations": [{}]
             }

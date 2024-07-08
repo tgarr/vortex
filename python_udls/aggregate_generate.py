@@ -12,7 +12,9 @@ import pickle
 import re
 import time
 from perf_config import *
-
+import transformers
+import torch
+from collections import OrderedDict
 
 
 # Class to store the cluster search results for each query
@@ -62,6 +64,19 @@ class ClusterSearchResults:
 # TODO: this implementation has a lot of copies for small objects (query results), 
 #       could be optimized if implemented in C++. But may not be the bottleneck
 class AggregateGenerateUDL(UserDefinedLogic):
+     def load_llm(self,):
+          self.pipeline = transformers.pipeline(
+               "text-generation",
+               model=self.model_id,
+               model_kwargs={"torch_dtype": torch.bfloat16},
+               device_map="auto",
+          )
+          self.terminators = [
+               self.pipeline.tokenizer.eos_token_id,
+               self.pipeline.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+          ]
+          
+
      def __init__(self,conf_str):
           '''
           Constructor
@@ -80,8 +95,14 @@ class AggregateGenerateUDL(UserDefinedLogic):
           self.answer_mapping_file = './perf_data/miniset/answer_mapping.pickle'
           self.doc_list = None
           self.answer_mapping = None
+          self.model_id = "meta-llama/Meta-Llama-3-8B-Instruct"
+          self.pipeline = None
+          self.terminators = None
+          # one server setting, gpu only host one model
+          if not self.my_id == 0:
+               self.load_llm()
           
-          
+
      def check_client_batch_finished(self, query_batch_key, query_count):
           '''
           Check if all queries in the client batch are finished
@@ -159,7 +180,46 @@ class AggregateGenerateUDL(UserDefinedLogic):
                res[query_text] = doc_list
           return res
 
-
+     def llm_generate(self, sorted_client_query_batch_result):
+          """
+          @input all in natural language
+          {
+               query_text : [document_1, document_2, ...]
+               ...
+          }
+          
+          @return LLM gen answers
+          {
+               query_text : query_llm_response
+          }
+          
+          
+          for ordering of dictionary, the ref: https://stackoverflow.com/questions/1867861/how-to-keep-keys-values-in-same-order-as-declared
+          """    
+          batch_query_llm_response = OrderedDict()
+          for query_text, doc_list in sorted_client_query_batch_result.items():
+               messages = [
+                    {"role": "system", "content": "Answer the user query based on this list of documents:"+" ".join(doc_list)},
+                    {"role": "user", "content": query_text},
+               ]
+               
+               tmp_res = self.pipeline(
+                    messages,
+                    max_new_tokens=256,
+                    eos_token_id=self.terminators,
+                    do_sample=True,
+                    temperature=0.6,
+                    top_p=0.9,
+               )
+               raw_text = tmp_res[0]["generated_text"][-1]['content']
+               print(f"for query:{query_text}")
+               print(f"the llm generated response: {raw_text}")
+               batch_query_llm_response[query_text] = raw_text     
+          return batch_query_llm_response
+          
+               
+     
+     
      def ocdpo_handler(self,**kwargs):
           key = kwargs["key"]
           blob = kwargs["blob"]
@@ -222,7 +282,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
                sorted_client_query_batch_result = {k: client_query_batch_result[k] for k in sorted(client_query_batch_result)}
                print(f"Yifan:\n {sorted_client_query_batch_result}")
                sorted_client_query_batch_result = self.retrieve_documents(sorted_client_query_batch_result)
-               client_query_batch_result_json = json.dumps(sorted_client_query_batch_result)
+               llm_generated_client_batch_res = self.llm_generate(sorted_client_query_batch_result)
+               
+               client_query_batch_result_json = json.dumps(llm_generated_client_batch_res)
                # 3.2 save the result as KV object in cascade to be retrieved by client
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, self.my_id, query_batch_id, 0)
                self.capi.put(next_key, client_query_batch_result_json.encode('utf-8'))
