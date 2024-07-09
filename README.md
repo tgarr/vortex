@@ -12,12 +12,17 @@
 
    BGE-M3: https://github.com/FlagOpen/FlagEmbedding 
 
+   It could be built via ```pip install -r requirements.txt```
+
 5. Generator model:
 
    Meta Llama3: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct
 
    In order to use the huggingface model, first request access via above link to Llama3, then do
 ```huggingface-cli login``` using your own token [huggingface user page: settings ==> access tokens(Read access)]
+
+# Configuration
+We put our runtime configurations in the file ```perf_conf.py```.  Llama3, the LLM model at generate step, requires 16 GB GPU memories to run. So we set a flag in perf_config.py ```INCLUDE_RUNNING_LLM``` if it set to 1, then the pipeline runs the LLM, otherwise, it only serves as a vector database that produces the related documents to the queries.
 
 
 # Run
@@ -62,7 +67,7 @@ We wrote an example query using cascade python client API, ```client_query.py```
 
 
 ### 4. Performance test
-For performance testing, we created client side test scripts. ```perf_test_setup.py``` (for initialize the vector database) and ```perf_test_client.py```(for putting queries). The configuration of the test is defined in ```config.h.in```
+For performance testing, we created client side test scripts. ```perf_test_setup.py``` (for initialize the vector database) and ```perf_test_client.py```(for putting queries). The configuration of the test is defined in ```config.h.in``` . The dataset used for perf_test could be download from directory /erf_data, by running ```./download_testset.sh```
 
 # Docker image
 We have built a docker image that have nvcc and cascade,derecho built setup. You can pull from the docker image and run it on your environment.

@@ -22,7 +22,9 @@ RETRIEVE_WAIT_INTERVAL = 0.5 # seconds
 '''
 Configurations for debugging
 '''
+INCLUDE_RUNNING_LLM=0
 PRINT_DEBUG_MESSAGE=@PRINT_DEBUG_MESSAGE@
+
 
 
 '''
