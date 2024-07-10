@@ -96,7 +96,7 @@ def main(argv):
                          print(f"Getting key:{result_key} with NULL result_future.")
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
-          if (query_batch_id + 1) % PRINT_FINISH_INTEVAL == 0:
+          if (querybatch_id + 1) % PRINT_FINISH_INTEVAL == 0:
                print(f"Finished processing query_batch {querybatch_id}")
 
      tl.flush(f"client_timestamp.dat")

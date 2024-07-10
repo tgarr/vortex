@@ -18,6 +18,8 @@
 
    Meta Llama3: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct
 
+   Ask for access on huggingface for Llama3: https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct 
+
    In order to use the huggingface model, first request access via above link to Llama3, then do
 ```huggingface-cli login``` using your own token [huggingface user page: settings ==> access tokens(Read access)]
 
