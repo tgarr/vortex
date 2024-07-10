@@ -32,7 +32,6 @@ def create_object_pool(capi, basepath):
             subgroup_index = int(fields[2])
             if len(fields) >= 4:
                 affinity_set_regex = fields[3].strip()
-                print(f"AFFINITY: {pool_path} {affinity_set_regex}")
                 res = capi.create_object_pool(pool_path,SUBGROUP_TYPES[subgroup_type],
                                               subgroup_index,
                                               affinity_set_regex=affinity_set_regex)
@@ -78,40 +77,41 @@ def break_into_chunks(num_embeddings, chunk_size):
 
     
 def put_initial_embeddings(capi, basepath):
-    print("Putting centroids and clusters' embeddings to cascade server ...")
+    print("Initialized: putting centroids and clusters' embeddings to cascade server ...")
     # 1. Put centroids'embeddings to cascade.
     centroid_file_name = 'validate_first_100_centroids.pickle'
-    centroids_chunk_idx = break_into_chunks(NUM_CENTROIDS, NUM_EMB_PER_OBJ)
-    print(f"NUM_CENTROIDS is {NUM_CENTROIDS}")
     centroids_embs = get_embeddings(basepath, centroid_file_name, EMBEDDING_DIM)
+    centroids_chunk_idx = break_into_chunks(centroids_embs.shape[0], NUM_EMB_PER_OBJ)
+    print(f"number of centroids from pickle is {centroids_embs.shape[0]}")
     for i, (start_idx, end_idx) in enumerate(centroids_chunk_idx):
         key = f"/rag/emb/centroids/{i}"
         centroids_embs_chunk = centroids_embs[start_idx:end_idx]
         res = capi.put(key, centroids_embs_chunk.tobytes())
         if res:
             res.get_result()
-            print(f"Put the centroids embeddings {start_idx}:{end_idx} to key: {key}")
+            print(f"Put the centroids embeddings to key: {key}, shape: {centroids_embs_chunk.shape}")
         else:
             print(f"Failed to put the centroids embeddings to key: {key}")
             exit(1)
-    print("Initialized: Put the centroids embeddings")
 
     # 2. Put clusters' embeddings to cascade.
     centroid_count = centroids_embs.shape[0]
     cluster_file_name_list = [f'validate_first_100_ebd_doc_{count}.pickle' for count in range(centroid_count)]
     for cluster_id, cluster_file_name in enumerate(cluster_file_name_list):
         cluster_embs = get_embeddings(basepath, cluster_file_name, EMBEDDING_DIM)
-        cluster_chunk_idx = break_into_chunks(NUM_EMB_PER_CENTROIDS, NUM_EMB_PER_OBJ)
+        num_embeddings = cluster_embs.shape[0]
+        cluster_chunk_idx = break_into_chunks(num_embeddings, NUM_EMB_PER_OBJ)
         for i, (start_idx, end_idx) in enumerate(cluster_chunk_idx):
             key = f"/rag/emb/cluster{cluster_id}/{i}"
             cluster_embs_chunk = cluster_embs[start_idx:end_idx]
             res = capi.put(key, cluster_embs_chunk.tobytes())
             if res:
                 res.get_result()
+                print(f"Put the cluster embeddings to key: {key}, shape: {cluster_embs_chunk.shape}")
             else:
                 print(f"Failed to put the cluster embeddings to key: {key}")
                 exit(1)
-    print(f"Initialized: Put the clusters embeddings")
+    print(f"Initialized")
 
 
 def main(argv):

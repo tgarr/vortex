@@ -289,6 +289,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             return;
         }
         int query_batch_id = parse_batch_id(key_string); // Logging purpose
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,query_batch_id,cluster_id);
         // 1. compute knn for the corresponding cluster on this node
         // 1.1. check if local cache contains the embeddings of the cluster
         auto it = this->clusters_embs.find(cluster_id);
@@ -311,8 +312,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         float* data;
         uint32_t nq;
         std::map<int, std::string> query_dict;
-        // std::vector<std::string> queries;
-        TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,query_batch_id,cluster_id);
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_START,my_id,query_batch_id,cluster_id);
         deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,query_dict);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,my_id,query_batch_id,cluster_id);
 

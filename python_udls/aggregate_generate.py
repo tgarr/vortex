@@ -214,8 +214,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
                     top_p=0.9,
                )
                raw_text = tmp_res[0]["generated_text"][-1]['content']
-               print(f"for query:{query_text}")
-               print(f"the llm generated response: {raw_text}")
+               if PRINT_DEBUG_MESSAGE == 1:
+                    print(f"for query:{query_text}")
+                    print(f"the llm generated response: {raw_text}")
                batch_query_llm_response[query_text] = raw_text     
           return batch_query_llm_response
           
@@ -259,6 +260,8 @@ class AggregateGenerateUDL(UserDefinedLogic):
           cluster_result = json.loads(json_str_decoded)
           query_text = cluster_result["query"]
           
+          self.tl.log(LOG_TAG_AGG_UDL_FINISHED_PARSE, self.my_id, qb_qid, cluster_id)
+
           # 2. add the cluster result to the aggregated query results
           if (query_batch_key, query_count) not in self.cluster_search_res:
                self.cluster_search_res[(query_batch_key, query_count)] = {}
@@ -267,7 +270,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
                     ClusterSearchResults(self.top_clusters_count, self.top_k, query_text)
           self.cluster_search_res[(query_batch_key,query_count)][qid].add_cluster_result(cluster_id, cluster_result)
           if not self.cluster_search_res[(query_batch_key,query_count)][qid].collected_all_results:
-               self.tl.log(LOG_TAG_AGG_UDL_END, self.my_id, qb_qid, cluster_id)
+               self.tl.log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, self.my_id, qb_qid, cluster_id)
                return
 
           self.tl.log(LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED, self.my_id, qb_qid, 0)
@@ -282,8 +285,12 @@ class AggregateGenerateUDL(UserDefinedLogic):
                next_key = f"/rag/generate/{query_batch_key}_results"
                client_query_batch_result = self.format_client_batch_result(query_batch_key, query_count)
                sorted_client_query_batch_result = {k: client_query_batch_result[k] for k in sorted(client_query_batch_result)}
-               print(f"Yifan:\n {sorted_client_query_batch_result}")
+               if PRINT_DEBUG_MESSAGE == 1:
+                    print(f"Sorted client_query_batch_result:\n {sorted_client_query_batch_result}")
+
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, self.my_id, qb_qid, 0)
                sorted_client_query_batch_result = self.retrieve_documents(sorted_client_query_batch_result)
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, self.my_id, qb_qid, 0)
                if INCLUDE_RUNNING_LLM == 1:
                     llm_generated_client_batch_res = self.llm_generate(sorted_client_query_batch_result)
                     client_query_batch_result_json = json.dumps(llm_generated_client_batch_res)
@@ -296,7 +303,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
                     print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
                               \n                   value: {client_query_batch_result_json}")
                self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, self.my_id, query_batch_id, 0)
-          self.tl.log(LOG_TAG_AGG_UDL_END, self.my_id, qb_qid, cluster_id)
+               return
+
+          self.tl.log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, self.my_id, qb_qid, cluster_id)
           
 
      def __del__(self):

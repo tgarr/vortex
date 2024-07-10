@@ -65,8 +65,7 @@ def main(argv):
      client_id = capi.get_my_id()
      tl = TimestampLogger()
 
-     # for querybatch_id in range(TOTAL_BATCH_COUNT):
-     for querybatch_id in range(1):
+     for querybatch_id in range(TOTAL_BATCH_COUNT):
           # Send batch of queries to Cascade service
           key = f"/rag/emb/py_centroids_search/client{client_id}qb{querybatch_id}"
           query_list = get_queries(BASE_PATH, QUERY_PICKLE_FILE, querybatch_id)
@@ -89,14 +88,16 @@ def main(argv):
                     if len(res_dict['value']) > 0:
                          result_generated = True
                          tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,0)
-                         if True:
+                         if PRINT_DEBUG_MESSAGE == 1:
                               # result dictionary format["query_id": (float(distance), int(cluster_id), int(emb_id)), "query_id":(...) ... ]
                               print(f"Got result from key:{result_key}, value:{res_dict['value']}")
                else:
-                    if PRINT_DEBUG_MESSAGE:
+                    if PRINT_DEBUG_MESSAGE == 1:
                          print(f"Getting key:{result_key} with NULL result_future.")
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
+          if (query_batch_id + 1) % PRINT_FINISH_INTEVAL == 0:
+               print(f"Finished processing query_batch {querybatch_id}")
 
      tl.flush(f"client_timestamp.dat")
 

@@ -71,7 +71,6 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
           (The reason not to call it at initialization, is that initialization is called upon server starts, 
           but the data have not been put to the servers yet, this needs to be called after the centroids data are put)
           '''
-          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_START, self.my_id, 0, 0)
           centroids_obj_keys = self.get_centroid_obj_keys(self.capi)
           if len(centroids_obj_keys) == 0:
                print(f"Failed to get the centroids embeddings")
@@ -95,8 +94,6 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
                print(f"loaded centroid_embeddings shape: {self.centroids_embeddings.shape}")
           self.index.add(self.centroids_embeddings)
           self.have_centroids_loaded = True
-          self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_END, self.my_id, 0, 0)
-          # array1 = np.concatenate((array1, array2), axis=0)
 
 
      def combine_common_clusters(self, knn_result_I):
@@ -126,7 +123,9 @@ class EncodeCentroidsSearchUDL(UserDefinedLogic):
 
           # 0. load centroids' embeddings
           if self.centroids_embeddings.size == 0:
+               self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_START, self.my_id, 0, 0)
                self.load_centroids_embeddings()
+               self.tl.log(LOG_TAG_CENTROIDS_EMBEDDINGS_LOADING_END, self.my_id, 0, 0)
           # 1. process the queries from blob to embeddings
           decoded_json_string = blob.tobytes().decode('utf-8')
           query_list = json.loads(decoded_json_string)
