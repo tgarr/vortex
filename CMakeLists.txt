@@ -41,6 +41,7 @@ target_include_directories(python_udl PRIVATE
 target_link_libraries(python_udl cascade Python3::Python Python3::NumPy)
 
 # printout mode
+set(INCLUDE_RUNNING_LLM 0)
 set(PRINT_DEBUG_MESSAGE 0)
 
 # Client log tags
