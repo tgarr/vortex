@@ -96,6 +96,8 @@ def main(argv):
                          print(f"Getting key:{result_key} with NULL result_future.")
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
+          if not result_generated:
+               print(f"Failed to get result for querybatch_id:{querybatch_id} after {MAX_RESULT_WAIT_TIME} seconds.")
           if (querybatch_id + 1) % PRINT_FINISH_INTEVAL == 0:
                print(f"Finished processing query_batch {querybatch_id}")
 

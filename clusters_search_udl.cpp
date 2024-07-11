@@ -348,8 +348,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             std::string json_str = json_obj.dump();
             Blob blob(reinterpret_cast<const uint8_t*>(json_str.c_str()), json_str.size());
             // 4.3 emit the result
-            /*** TODO: use query_dict to get qid ***/
-            int qid = 0;
+            int qid = it->first;
+            std::cout << "qid" << qid << std::endl;
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,my_id,query_batch_id,qid);
             emit(new_keys[idx], EMIT_NO_VERSION_AND_TIMESTAMP , blob);
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,my_id,query_batch_id,qid);
