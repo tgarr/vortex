@@ -292,9 +292,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
                if PRINT_DEBUG_MESSAGE == 1:
                     print(f"Sorted client_query_batch_result:\n {sorted_client_query_batch_result}")
 
-               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, self.my_id, qb_qid, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, self.my_id, query_batch_id, 0)
                sorted_client_query_batch_result = self.retrieve_documents(sorted_client_query_batch_result)
-               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, self.my_id, qb_qid, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, self.my_id, query_batch_id, 0)
                if INCLUDE_RUNNING_LLM == 1:
                     llm_generated_client_batch_res = self.llm_generate(sorted_client_query_batch_result)
                     client_query_batch_result_json = json.dumps(llm_generated_client_batch_res)
