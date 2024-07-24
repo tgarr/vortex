@@ -5,8 +5,10 @@
 #include <map>
 #include <iostream>
 #include <unordered_map>
+#include <derecho/openssl/hash.hpp>
 
-#include "grouped_embeddings.hpp"
+#include "grouped_embeddings_for_search.hpp"
+#include "utils.hpp"
 
 
 namespace derecho{
@@ -27,131 +29,12 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     // maps from cluster ID -> embeddings of that cluster, 
     // because there could be more than 1 clusters hashed to one node by affinity set.
-    std::unordered_map<int, std::unique_ptr<GroupedEmbeddings>> clusters_embs;
+    std::unordered_map<int, std::unique_ptr<GroupedEmbeddingsForSearch>> clusters_embs;
 
     // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
     int top_k = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
-
-    /*** 
-     * Helper function to fill_cluster_embs_in_cache()
-     * Retrieve the embeddings of a single object from the KV store in Cascade. 
-     * This retrive doesn't involve copying the data.
-     * @param cluster_num_embs the number of embeddings in the cluster
-     * @param cluster_emb_key the key of the object to retrieve
-     * @param typed_ctxt the context to get the service client reference
-     * @param version the version of the object to retrieve
-     * @param stable whether to get the stable version of the object
-    ***/
-    float* single_emb_object_retrieve(int& cluster_num_embs,
-                                        std::string& cluster_emb_key,
-                                        DefaultCascadeContextType* typed_ctxt,
-                                        persistent::version_t version,
-                                        bool stable = 1){
-        float* data;
-        // 1. get the object from KV store
-        auto get_query_results = typed_ctxt->get_service_client_ref().get(cluster_emb_key,version, stable);
-        auto& reply = get_query_results.get().begin()->second.get();
-        Blob blob = std::move(const_cast<Blob&>(reply.blob));
-        blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED; // Avoid copy, use bytes from reply.blob, transfer its ownership to GroupedEmbeddings.emb_data
-        // 2. get the embeddings from the object
-        data = const_cast<float*>(reinterpret_cast<const float *>(blob.bytes));
-        size_t num_points = blob.size / sizeof(float);
-        cluster_num_embs += num_points / this->emb_dim;
-        return data;
-    }
-
-    /*** 
-     * Helper function to fill_cluster_embs_in_cache()
-     * Retrieve the embeddings of multiple objects from the KV store in Cascade. 
-     * This involve copying the data from received blobs.
-    ***/
-    float* multi_emb_object_retrieve(int& cluster_num_embs,
-                                    std::vector<std::string>& cluster_emb_obj_keys,
-                                    DefaultCascadeContextType* typed_ctxt,
-                                    persistent::version_t version,
-                                    bool stable = 1){
-        float* data;
-        size_t num_obj = cluster_emb_obj_keys.size();
-        size_t data_size = 0;
-        Blob blobs[num_obj];
-        for (size_t i = 0; i < num_obj; i++) {
-            auto get_query_results = typed_ctxt->get_service_client_ref().get(cluster_emb_obj_keys[i],version, stable);
-            auto& reply = get_query_results.get().begin()->second.get();
-            blobs[i] = std::move(const_cast<Blob&>(reply.blob));
-            data_size += blobs[i].size / sizeof(float);
-        }
-        // 2. copy the embeddings from the blobs to the data
-        data = (float*)malloc(data_size * sizeof(float));
-        size_t offset = 0;
-        for (size_t i = 0; i < num_obj; i++) {
-            memcpy(data + offset, blobs[i].bytes, blobs[i].size);
-            offset += blobs[i].size / sizeof(float);
-        }
-        cluster_num_embs = data_size / this->emb_dim;
-        return data;
-    }
-
-    /***
-     * Fill in the memory cache by getting the clusters' embeddings from KV store in Cascade
-     * This function is called when this UDL is first triggered by caller to operator(),
-     * it sacrifices the first request to this node, but the following requests will benefit from this cache.
-     * In static RAG setting, this function should be called only once at the begining
-     * In dynamic RAG setting, this function could be extended to call periodically or upon notification 
-     * (The reason of not filling it at initialization, is that initialization is called upon server starts, 
-     *  but the data have not been put to the servers yet, this needs to be called after the clusters' embeddings data are put)
-     * @param cluster_id the cluster ID to get the embeddings
-     * @param typed_ctxt the context to get the service client reference
-     * @return 0 on success, -1 on failure
-     * @note we load the stabled version of the cluster embeddings
-    ***/
-    int fill_cluster_embs_in_cache(int cluster_id, 
-                                    DefaultCascadeContextType* typed_ctxt){
-        bool stable = 1; 
-        persistent::version_t version = CURRENT_VERSION;
-        // 0. check the keys for this cluster embedding objects stored in cascade
-        //    because of the message size, one cluster might need multiple objects to store its embeddings
-        std::string cluster_prefix = "/rag/emb/cluster" + std::to_string(cluster_id); /*** TODO: move it to config, the /rag/emb/cluster is hard-coded here ***/
-        auto keys_future = typed_ctxt->get_service_client_ref().list_keys(version, stable, cluster_prefix);
-        std::vector<std::string> cluster_emb_obj_keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
-        if (cluster_emb_obj_keys.empty()) {
-            std::cerr << "Error: cluster" << cluster_id <<" has no cluster embeddings found in the KV store" << std::endl;
-            dbg_default_error("Failed to find cluster embeddings in the KV store, at clusters_search_udl.");
-            return -1;
-        }
-
-        // 1. Get the cluster embeddings from KV store in Cascade
-        float* data;
-        int cluster_num_embs = 0;
-        if (cluster_emb_obj_keys.size() == 1) {
-            data = single_emb_object_retrieve(cluster_num_embs, cluster_emb_obj_keys[0], typed_ctxt, version, stable);
-        } else {
-            data = multi_emb_object_retrieve(cluster_num_embs, cluster_emb_obj_keys, typed_ctxt, version ,stable);
-        }
-        if (cluster_num_embs == 0) {
-            std::cerr << "Error: cluster" << cluster_id <<" has no embeddings found in the KV store" << std::endl;
-            dbg_default_error("Failed to find cluster embeddings in the KV store, at clusters_search_udl.");
-            return -1;
-        }
-        if (PRINT_DEBUG_MESSAGE == 1)
-            std::cout << "[ClustersSearchOCDPO]: num_emb_objects=" << cluster_num_embs << std::endl;
-        
-        // 2. fill in the memory cache
-        this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddings>(this->emb_dim, cluster_num_embs, data);
-        if (this->faiss_search_type == 0){
-            this->clusters_embs[cluster_id]->initialize_cpu_flat_search(); // use CPU search in ocdpo search
-        } else if (this->faiss_search_type == 1){
-            this->clusters_embs[cluster_id]->initialize_gpu_flat_search(); // use GPU search in ocdpo search
-        } else if (this->faiss_search_type == 2){
-            this->clusters_embs[cluster_id]->initialize_gpu_ivf_flat_search(); // use GPU IVF search in ocdpo search
-        } else {
-            std::cerr << "Error: faiss_search_type not supported" << std::endl;
-            dbg_default_error("Failed to initialize faiss search type, at clusters_search_udl.");
-            return -1;
-        }
-        return 0;
-    }
 
     /***
      * Get the cluster ID from the object's key_string
@@ -180,75 +63,32 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     /***
      * Format the new_keys for the search results of the queries
-     * it is formated as client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}_{hash(query)}
+     * it is formated as client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}_qid{hash(query)}
      * @param new_keys the new keys to be constructed
      * @param key_string the key string of the object
-     * @param query_dict {query_id: query_string}
+     * @param query_list a list of query strings
     ***/
     inline void construct_new_keys(std::vector<std::string>& new_keys,
                                                        const std::string& key_string, 
-                                                       const std::map<int, std::string>& query_dict) {
-        for (const auto& pair : query_dict) {
-            std::string new_key = key_string + "_qid" + std::to_string(pair.first);
-            new_keys.push_back(new_key);
-        }
-    }
-
-    /*** 
-     * Helper function to cdpo_handler()
-     * @param bytes the bytes object to deserialize
-     * @param data_size the size of the bytes object
-     * @param nq the number of queries in the blob object, output. Used by FAISS search.
-        type is uint32_t because in previous encode_centroids_search_udl, it is serialized from an unsigned "big" ordered int
-     * @param query_embeddings the embeddings of the queries, output. 
-    ***/
-    void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
-                                                                const std::size_t& data_size,
-                                                                uint32_t& nq,
-                                                                float*& query_embeddings,
-                                                                std::map<int, std::string>& query_dict) {
-        
-        // 0. get the number of queries in the blob object
-        nq = (static_cast<uint32_t>(bytes[0]) << 24) |
-                     (static_cast<uint32_t>(bytes[1]) << 16) |
-                     (static_cast<uint32_t>(bytes[2]) <<  8) |
-                     (static_cast<uint32_t>(bytes[3]));
-        if (PRINT_DEBUG_MESSAGE == 1)
-            std::cout << "Number of queries: " << nq << std::endl;
-        // 1. get the emebddings of the queries from the blob object
-        std::size_t float_array_start = 4;
-        std::size_t float_array_size = sizeof(float) * this->emb_dim * nq;
-        std::size_t float_array_end = float_array_start + float_array_size;
-        if (data_size < float_array_end) {
-            std::cerr << "Data size "<< data_size <<" is too small for the expected float array end: " << float_array_end <<"." << std::endl;
-            return;
-        }
-        query_embeddings = const_cast<float*>(reinterpret_cast<const float*>(bytes + float_array_start));
-
-        // 2. get the queries from the blob object
-        std::size_t json_start = float_array_end;
-        if (json_start >= data_size) {
-            std::cerr << "No space left for queries data." << std::endl;
-            return;
-        }
-        // Create a JSON string from the remainder of the bytes object
-        char* json_data = const_cast<char*>(reinterpret_cast<const char*>(bytes + json_start));
-        std::size_t json_size = data_size - json_start;
-        std::string json_string(json_data, json_size);
-
-        // Parse the JSON string using nlohmann/json
-        nlohmann::json parsed_json;
-        try {
-            parsed_json = nlohmann::json::parse(json_string);
-            // Note: the map is ordered according to the order of queries, 
-            // which is how the json is constructed by encode_centroids_search_udl
-            for (json::iterator it = parsed_json.begin(); it != parsed_json.end(); ++it) {
-                int key = std::stoi(it.key());  // Convert key from string to int
-                std::string value = it.value(); // Get the value (already a string)
-                query_dict[key] = value;
+                                                       const std::vector<std::string>& query_list) {
+        for (const auto& query : query_list) {
+            std::string hashed_query;
+            try {
+                uint8_t digest[32];
+                openssl::Hasher sha256(openssl::DigestAlgorithm::SHA256);
+                const char* query_cstr = query.c_str();
+                sha256.hash_bytes(query_cstr, strlen(query_cstr), digest);
+                std::ostringstream oss;
+                for (int i = 0; i < 32; ++i) {
+                    oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
+                }
+                hashed_query = oss.str();
+            } catch(openssl::openssl_error& ex) {
+                dbg_default_error("Unable to compute SHA256 of typename. string = {}, exception name = {}", query, ex.what());
+                throw;
             }
-        } catch (const nlohmann::json::parse_error& e) {
-            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            std::string new_key = key_string + "_qid" + hashed_query;
+            new_keys.push_back(new_key);
         }
     }
 
@@ -279,8 +119,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                uint32_t worker_id) override {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         auto my_id = typed_ctxt->get_service_client_ref().get_my_id();
-        if (PRINT_DEBUG_MESSAGE == 1)
-            std::cout << "[Clusters search ocdpo]: I(" << worker_id << ") received an object from sender:" << sender << " with key=" << key_string  << std::endl;
+        dbg_default_debug("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         // 0. get the cluster ID
         int cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
         if (cluster_id == -1) {
@@ -295,7 +134,9 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         auto it = this->clusters_embs.find(cluster_id);
         if (it == this->clusters_embs.end()){
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START,my_id,query_batch_id,cluster_id);
-            int filled_cluster_embs = fill_cluster_embs_in_cache(cluster_id, typed_ctxt);
+            this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddingsForSearch>(this->faiss_search_type, this->emb_dim);
+            std::string cluster_prefix = "/rag/emb/cluster" + std::to_string(cluster_id);
+            int filled_cluster_embs = this->clusters_embs[cluster_id]->retrieve_grouped_embeddings(cluster_prefix,typed_ctxt);
             if (filled_cluster_embs == -1) {
                 std::cerr << "Error: failed to fill the cluster embeddings in cache" << std::endl;
                 dbg_default_error("Failed to fill the cluster embeddings in cache, at clusters_search_udl.");
@@ -311,56 +152,43 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
         float* data;
         uint32_t nq;
-        std::map<int, std::string> query_dict;
+        std::vector<std::string> query_list;
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_START,my_id,query_batch_id,cluster_id);
-        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,data,query_dict);
+        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,my_id,query_batch_id,cluster_id);
 
         // 3. search the top K embeddings that are close to the query
         long* I = new long[this->top_k * nq];
         float* D = new float[this->top_k * nq];
-        if (this->faiss_search_type == 0)
-            embs->faiss_cpu_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
-        else if (this->faiss_search_type == 1)
-            embs->faiss_gpu_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
-        else if (this->faiss_search_type == 2)
-            embs->faiss_gpu_ivf_flat_search(static_cast<int32_t>(nq), data, this->top_k, D, I);
-        else {
-            std::cerr << "Error: faiss_search_type not supported" << std::endl;
-            dbg_default_error("Failed to search the top K embeddings, at clusters_search_udl.");
-            return;
-        }
+        embs->search(nq,data,this->top_k,D,I);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,my_id,query_batch_id,cluster_id);
 
 
         // 4. emit the result to the subsequent UDL
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
-        construct_new_keys(new_keys, key_string, query_dict);
+        construct_new_keys(new_keys, key_string, query_list);
         int idx = 0;
-        for (auto it = query_dict.begin(); it != query_dict.end(); ++it) {
+        for (auto it = query_list.begin(); it != query_list.end(); ++it) {
             // 4.2 construct the cluster search result of query idx
             nlohmann::json json_obj; // format it as {"emb_id1": distance1, ...}
             for (int j = 0; j < this->top_k; j++) {
                 json_obj[std::to_string(I[idx * this->top_k + j])] = std::to_string(D[idx * this->top_k + j]);
             }
-            json_obj["query"] = it->second;
+            json_obj["query_text"] = *it;
             std::string json_str = json_obj.dump();
             Blob blob(reinterpret_cast<const uint8_t*>(json_str.c_str()), json_str.size());
             // 4.3 emit the result
-            int qid = it->first;
-            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,my_id,query_batch_id,qid);
+            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,my_id,query_batch_id,0);
             emit(new_keys[idx], EMIT_NO_VERSION_AND_TIMESTAMP , blob);
-            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,my_id,query_batch_id,qid);
-            if (PRINT_DEBUG_MESSAGE == 1)
-                std::cout << "Emitted key: " << new_keys[idx] << ", blob: " << json_str << std::endl;
+            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,my_id,query_batch_id,0);
+            dbg_default_debug("[Cluster search ocdpo]: Emitted key:{} " ,new_keys[idx]);
             idx ++;
         }
         delete[] I;
         delete[] D;
         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_END,my_id,query_batch_id,cluster_id);
-        if (PRINT_DEBUG_MESSAGE == 1)
-            std::cout << "[Cluster search ocdpo]: FINISHED knn search for key: " << key_string << std::endl;
+        dbg_default_debug("[Cluster search ocdpo]: FINISHED knn search for key: {}.", key_string );
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;

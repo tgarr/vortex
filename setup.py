@@ -5,6 +5,8 @@ import os
 import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
+sys.path.append(os.path.join(os.path.dirname(__file__), 'setup'))
+from util import *
 
 from perf_config import *
 
@@ -19,9 +21,8 @@ SUBGROUP_TYPES = {
         }
 
 # EMBEDDING_DIM = 1024
-# NUM_CENTROIDS = 3 # TODO: temp start with 3 clusters
-# NUM_EMB_PER_CENTROIDS = 10000
-# NUM_EMB_PER_OBJ = 200 # < 1MB/4KB = 250
+NUM_CENTROIDS = 3 # TODO: temp start with 3 clusters
+NUM_EMB_PER_CENTROIDS = 100
 
 
 def create_object_pool(capi, basepath):
@@ -52,36 +53,23 @@ def create_object_pool(capi, basepath):
             # time.sleep(0.5)
 
 
-def get_embeddings(basepath, filename="centroids.pkl", d=64, num_embs=100):
-    '''
-    Load the embeddings from pickle files
-    TODO: this is a placeholder, need to replace with real data
-    '''
-    xb = np.random.random((num_embs, d)).astype('float32')
-    xb[:, 0] += np.arange(num_embs) / 1000.
-    return xb
-
-
     
 
 def put_initial_embeddings(capi, basepath):
     print("Putting centroids and clusters' embeddings to cascade server ...")
     fpath = os.path.join(basepath,OBJECT_POOLS_LIST)
-    num_clusters = NUM_CENTROIDS 
+    num_clusters = NUM_CENTROIDS
     # 1. Put centroids'embeddings to cascade
-    #  For quick test purpose, manually created two centroids objects, TODO: replace with real data
-    num_objects = 2
-    for i in range(num_objects):
-        key = f"/rag/emb/centroids/{i}"
-        centroids_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=(num_clusters//num_objects))
-        res = capi.put(key, centroids_embs.tobytes())
-        if res:
-            res.get_result()
-            print(f"Put the centroids embeddings to key: {key}")
-        else:
-            print(f"Failed to put the centroids embeddings to key: {key}")
-
     
+    key = f"/rag/emb/centroids_obj/0"
+    centroids_embs = generate_random_embeddings(d=EMBEDDING_DIM, num_embs=num_clusters)
+    res = capi.put(key, centroids_embs.tobytes())
+    if res:
+        res.get_result()
+        print(f"Put the centroids embeddings to key: {key}")
+    else:
+        print(f"Failed to put the centroids embeddings to key: {key}")
+
     print("Initialized: Put the centroids embeddings")
 
     # 2. put clusters' embeddings to cascade
@@ -90,7 +78,7 @@ def put_initial_embeddings(capi, basepath):
         for i in range(int(NUM_EMB_PER_CENTROIDS/NUM_EMB_PER_OBJ) + 1):
             key = f"/rag/emb/cluster{cluster_id}/{i}"
             obj_num_to_put = min(num_to_put, NUM_EMB_PER_OBJ)
-            cluster_embs = get_embeddings(basepath, d=EMBEDDING_DIM, num_embs=obj_num_to_put)
+            cluster_embs = generate_random_embeddings(d=EMBEDDING_DIM, num_embs=obj_num_to_put)
             res = capi.put(key, cluster_embs.tobytes())
             if res:
                 res.get_result()

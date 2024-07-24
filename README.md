@@ -50,9 +50,11 @@ Construct the vector database by putting centroids and clusters' embeddings and 
 #### Vector database Data Storage formats
 - embeddings: stored in /rag/emb object pool
 
-centroids stored in the format of /rag/emb/centroids/[obj_id], e.g. /rag/emb/centroids/1, /rag/emb/centroids/2
+centroids stored in the format of /rag/emb/centroids_obj/[obj_id], e.g. /rag/emb/centroids_obj/1, /rag/emb/centroids_obj/2
 
 cluster embeddings stored in the format of /rag/emb/cluster[cluster_id]/[obj_id], e.g. /rag/emb/cluster1/0, /rag/emb/cluster2/0
+
+Note that because we use these keys as identifier to the embeddings object, if other put have the same prefix put to Cascade, it may cause unexpected behaviour ([TODO] sanity check this) 
 
 - documents: stored in cascade as KV objects under /rag/doc object pool. Document objects' keys are in the format of /rag/doc/[cluster_id]-[emb_id]
 
@@ -61,9 +63,9 @@ Step1 and step2 could be done by running ``` python setup.py ``` at client node,
 ### 3. run UDLs
 After the vector database is constructed, clients could send batch of queries to cascade service. Queries are triggered by putting KV objects to its first UDL, encode_centroids_search_udl. 
 
-- The key prefix to trigger this udl is /rag/emb/py_centroids_search/, which defined in /cfg/dfgs.json.tmp. After the key prefix, the key could have the identifier for this batch of requests as its suffix. The recommended format is "/rag/emb/py_centroids_search/client[client_id]_qb[query_batch_id]" (e.g. /rag/emb/py_centroids_search/client5_qb0).
+- The key prefix to trigger this udl is /rag/emb/centroids_search/, which defined in /cfg/dfgs.json.tmp. After the key prefix, the key could have the identifier for this batch of requests as its suffix. The recommended format is "/rag/emb/centroids_search/client[client_id]_qb[query_batch_id]" (e.g. /rag/emb/centroids_search/client5_qb0). (query_batch_id is not required but used for logging purpose)
 
-- The value is a list of queries in bytes formats.
+- The value is a dictionary ({"query_text": ["query0", "query1"], "query_embedding": [emb0, emb1]}) in bytes formats.
 
 We wrote an example query using cascade python client API, ```client_query.py```. One can test and run it in any client nodes.
 

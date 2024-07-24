@@ -1,3 +1,3 @@
 /rag/emb VCSS 0 cluster[0-9]+
 /rag/doc PCSS 0
-/rag/generate VCSS 0 client[0-9]+qb[0-9]+
+/rag/generate VCSS 0 _qid[0-9]+

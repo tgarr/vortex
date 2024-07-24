@@ -6,6 +6,10 @@ import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
 import numpy as np
+sys.path.append(os.path.join(os.path.dirname(__file__), 'setup'))
+from util import *
+
+from perf_config import *
 
 
 OBJECT_POOLS_LIST = "setup/object_pools.list"
@@ -21,6 +25,9 @@ RETRIEVE_WAIT_INTERVAL = 0.5 # seconds
 
 
 
+
+
+
 def main(argv):
 
      print("Connecting to Cascade service ...")
@@ -28,20 +35,21 @@ def main(argv):
      #basepath = os.path.dirname(argv[0])
      basepath = "."
 
-     # create object pools
-     print("Creating object pools ...")
-     capi.create_object_pool("/test", "VolatileCascadeStoreWithStringKey", 0)
-
      # array = np.array([1.1, 2.22, 3.333, 4.4444, 5.55555], dtype=np.float32)
      client_id = capi.get_my_id()
      querybatch_id = 0
-     key = f"/rag/emb/py_centroids_search/client{client_id}qb{querybatch_id}"
+     key = f"/rag/emb/centroids_search/client{client_id}qb{querybatch_id}"
      query_list = ["hello world", "I am RAG"]
-     json_string = json.dumps(query_list)
-     encoded_bytes = json_string.encode('utf-8')
-     capi.put(key, encoded_bytes)
+     query_list_json = json.dumps(query_list)
+     query_list_json_bytes = query_list_json.encode('utf-8')
+     emb_list = generate_random_embeddings(d=EMBEDDING_DIM, num_embs=len(query_list))
+     emb_list_bytes = emb_list.tobytes()
+     num_queries = len(query_list)
+     num_queries_bytes = num_queries.to_bytes(4, byteorder='big', signed=False)
+     query_embeddings_and_query_list = num_queries_bytes + emb_list_bytes + query_list_json_bytes
+     capi.put(key, query_embeddings_and_query_list)
      # capi.put("/test/hello", array.tostring())  # deprecated
-     print(f"Put key:{key} \n    value:{query_list} to Cascade.")
+     print(f"Put key:{key} to Cascade.")
      result_key = "/rag/generate/" + f"client{client_id}qb{querybatch_id}_results"
      result_generated = False
      wait_time = 0
@@ -56,8 +64,8 @@ def main(argv):
                print(f"Getting key:{result_key} with NULL result_future.")
           time.sleep(RETRIEVE_WAIT_INTERVAL)
           wait_time += RETRIEVE_WAIT_INTERVAL
-
-     print("Done!")
+     if not result_generated:
+          print(f"Failed to get result from key:{result_key} after waiting for {MAX_RESULT_WAIT_TIME} seconds.")
 
 if __name__ == "__main__":
      main(sys.argv)
