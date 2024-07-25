@@ -45,7 +45,8 @@ def main(argv):
      emb_list_bytes = emb_list.tobytes()
      num_queries = len(query_list)
      num_queries_bytes = num_queries.to_bytes(4, byteorder='big', signed=False)
-     # TODO: add comments
+     # object to be put to cascade is in the formate of a byte array with 3 main parts:
+     # [number of queries (4 bytes)  + query embeddings (d*number of queries bytes) + query list json (variable length)]
      query_embeddings_and_query_list = num_queries_bytes + emb_list_bytes + query_list_json_bytes
      capi.put(key, query_embeddings_and_query_list)
      # capi.put("/test/hello", array.tostring())  # deprecated
