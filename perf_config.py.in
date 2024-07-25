@@ -55,3 +55,9 @@ LOG_TAG_AGG_UDL_PUT_RESULT_START=@LOG_TAG_AGG_UDL_PUT_RESULT_START@
 LOG_TAG_AGG_UDL_PUT_RESULT_END=@LOG_TAG_AGG_UDL_PUT_RESULT_END@
 
 
+'''
+Tags for generating queries in accordance with queueing theory.
+'''
+# Average number of queries per second, which is also the rate parameter lambda of the
+# exponential distribution. This is the inverse of the scale parameter.
+AVG_QUERY_PER_SEC = 10

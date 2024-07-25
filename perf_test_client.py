@@ -30,45 +30,61 @@ BASE_PATH = "./perf_data/miniset/"
 query_list = None
 
 
-def get_queries(basepath, filename, batch_id):
-     '''
-     Load the queries from pickle files
-     '''
-     # queries = []
-     # with open(os.path.join(basepath, filename), "rb") as f:
-     #      queries = pickle.load(f)
-     # return queries
-     # query_list = ["How big is an apple?", 
-     #                "What is the capital of France?", 
-     #                "What is the weather in New York?",
-     #                "How is the hotpot at Haidilao?",
-     #                "What is the best way to cook a steak?",
-     #                "Who is the most popular singer in the world?",
-     #                "How to make a cake?",
-     #                "How to make a cocktail?",
-     #                "What is the best way to play chess?",
-     #                "How to play basketball?"]
-     # return query_list[:batch_size]
+def get_queries(basepath, filename, query_index_range):
+     """Load the queries from pickle file.
+
+     Args:
+          basepath: The path of directory where the query pickle file resides.
+          filename: The filename of the query pickle file.
+          query_index_range: A pair of (start_index, end_index), which is non-inclusive.
+     
+     Returns:
+          The queries in plain texts that fall in the query index range.
+
+     Raises:
+          IndexError: This is raised when the query_index_range is larger than the range of queries we have.
+     """
      global query_list
      if query_list is None:
           fpath = os.path.join(basepath, filename)
           with open(fpath, 'rb') as file:
                query_list = pickle.load(file)
-     return query_list[QUERY_PER_BATCH * batch_id : QUERY_PER_BATCH * (batch_id + 1)]
+     return query_list[query_index_range[0] : query_index_range[1]]
 
 
 collected_all_results = True # TODO: check in code whether all queries have received results
+
+
+def get_query_batch():
+     """Get the start and end index of each query batch following Poisson distribution.
+
+     Returns:
+          [(start_index, end_index), ...]
+     """
+     query_intervals = np.random.Generator.exponential(1/AVG_QUERY_PER_BATCH, 
+                                                       int(AVG_QUERY_PER_BATCH * TOTAL_BATCH_COUNT * 1.5))
+     cumulated_intervals = np.cumsum(query_intervals)
+     query_count_list = list([0])
+     for batch in range(TOTAL_BATCH_COUNT):
+          previous_total = cumulated_intervals[cumulated_intervals <= batch].shape[0]
+          current_total = cumulated_intervals[cumulated_intervals <= batch + 1].shape[0]
+          query_count_list.append(current_total - previous_total)
+     query_count_array = np.cumsum(np.array(query_count_list, dtype=int))
+     res_query_count_list = [(query_count_array[i - 1], query_count_array[i]) for i in range(1, TOTAL_BATCH_COUNT + 1)]
+     return res_query_count_list
+
 
 def main(argv):
      capi = ServiceClientAPI()
      print("Connected to Cascade service ...")
      client_id = capi.get_my_id()
      tl = TimestampLogger()
+     query_batch_list = get_query_batch()
 
      for querybatch_id in range(TOTAL_BATCH_COUNT):
           # Send batch of queries to Cascade service
           key = f"/rag/emb/py_centroids_search/client{client_id}qb{querybatch_id}"
-          query_list = get_queries(BASE_PATH, QUERY_PICKLE_FILE, querybatch_id)
+          query_list = get_queries(BASE_PATH, QUERY_PICKLE_FILE, query_batch_list[querybatch_id])
           json_string = json.dumps(query_list)
           encoded_bytes = json_string.encode('utf-8')
           tl.log(LOG_TAG_QUERIES_SENDING_START, client_id, querybatch_id, 0)
