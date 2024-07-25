@@ -7,6 +7,7 @@
                 "pathname": "/rag/emb/centroids_search",
                 "shard_dispatcher_list": ["one"],
                 "user_defined_logic_list": ["10a2c111-1100-1100-1000-0001ac110000"],
+                "user_defined_logic_stateful_list": ["singlethreaded"],
                 "user_defined_logic_config_list": [
                     {
                         "centroids_emb_prefix":"/rag/emb/centroids_obj",
@@ -20,6 +21,7 @@
                 "pathname": "/rag/emb/clusters_search",
                 "shard_dispatcher_list": ["one"],
                 "user_defined_logic_list": ["11a2c123-2200-21ac-1755-0002ac220000"],
+                "user_defined_logic_stateful_list": ["singlethreaded"],
                 "user_defined_logic_config_list": [
                 {
                         "emb_dim":1024,

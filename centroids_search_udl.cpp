@@ -24,6 +24,7 @@ std::string get_description() {
 
 class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
+    int my_id;
     std::unique_ptr<GroupedEmbeddingsForSearch> centroids_embs;
     bool cached_centroids_embs = false;
 
@@ -63,6 +64,12 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/centroids_search instead of /rag/emb, i.e. the objp name***/
+        // Logging purpose for performance evaluation
+        if (key_string == "flush_logs") {
+            std::string log_file_name = "node" + this->my_id + "_udls_timestamp.dat";
+            TimestampLogger::flush(log_file_name);
+            return;
+        }
         auto my_id = typed_ctxt->get_service_client_ref().get_my_id();
         dbg_default_debug("[Centroids search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         int query_batch_id = parse_batch_id(key_string); // Logging purpose
@@ -155,7 +162,8 @@ public:
         return ocdpo_ptr;
     }
 
-    void set_config(const nlohmann::json& config){
+    void set_config(DefaultCascadeContextType* typed_ctxt,const nlohmann::json& config){
+        this->my_id = typed_ctxt->get_service_client_ref().get_my_id();
         try{
             if (config.contains("centroids_emb_prefix")) {
                 this->centroids_emb_prefix = config["centroids_emb_prefix"].get<std::string>();
@@ -184,8 +192,9 @@ void initialize(ICascadeContext* ctxt) {
 }
 
 std::shared_ptr<OffCriticalDataPathObserver> get_observer(
-        ICascadeContext*,const nlohmann::json& config) {
-    std::static_pointer_cast<CentroidsSearchOCDPO>(CentroidsSearchOCDPO::get())->set_config(config);
+        ICascadeContext* ctxt,const nlohmann::json& config) {
+    auto typed_ctxt = dynamic_cast<DefaultCascadeContextType*>(ctxt);
+    std::static_pointer_cast<CentroidsSearchOCDPO>(CentroidsSearchOCDPO::get())->set_config(typed_ctxt, config);
     return CentroidsSearchOCDPO::get();
 }
 

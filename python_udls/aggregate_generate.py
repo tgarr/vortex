@@ -184,7 +184,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
                print(f"[AggregateGenerate] received an object (key:{key}) with invalid key format")
                return
           cluster_id = int(match.group(1))
-          qid = int(match.group(2),16) % 1000 # TODO: temp fix for qid by only using the last 3 digits
+          qid = int(match.group(2),16) % 100000 # TODO: temp fix for qid by only using the last 5 digits
 
           self.tl.log(LOG_TAG_AGG_UDL_START, self.my_id, qid, cluster_id)
           
@@ -210,7 +210,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
 
           # 3.1 if collected all result, retrieve documents and run llm
           
-          next_key = "/rag/generate/" + key_without_runtime_info +"_results" 
+          next_key = "/rag/generate/" + key_without_runtime_info + "_result/" + "qid" + str(qid) 
           print(f"AggregateGenerateUDL next key is {next_key}")
 
           self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, self.my_id, qid, 0)
