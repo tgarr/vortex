@@ -33,6 +33,9 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
                                                             const int& emb_dim,
                                                             float*& query_embeddings,
                                                             std::vector<std::string>& query_list) {
+     if (data_size < 4) {
+          throw std::runtime_error("Data size is too small to deserialize its embeddings and queries.");
+     }
      
      // 0. get the number of queries in the blob object
      nq = (static_cast<uint32_t>(bytes[0]) << 24) |

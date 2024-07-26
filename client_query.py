@@ -6,10 +6,7 @@ import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
 import numpy as np
-sys.path.append(os.path.join(os.path.dirname(__file__), 'setup'))
-from util import *
-
-from perf_config import *
+from setup import *
 
 
 OBJECT_POOLS_LIST = "setup/object_pools.list"
@@ -73,6 +70,10 @@ def main(argv):
                          print(f"Got result from key:{result_key} \n    value:{res_dict}")
                else:
                     print(f"Getting key:{result_key} with NULL result_future.")
+          if num_queries == len(retrieved_queries):
+               print(f"Got all results for querybatch_id:{querybatch_id}")
+               result_generated = True
+               break
           time.sleep(RETRIEVE_WAIT_INTERVAL)
           wait_time += RETRIEVE_WAIT_INTERVAL
      if not result_generated:

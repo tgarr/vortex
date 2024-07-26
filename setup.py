@@ -5,10 +5,7 @@ import os
 import sys
 import time
 from derecho.cascade.external_client import ServiceClientAPI
-sys.path.append(os.path.join(os.path.dirname(__file__), 'setup'))
-from util import *
 
-from perf_config import *
 
 np.random.seed(1234)             # make reproducible
 
@@ -20,9 +17,19 @@ SUBGROUP_TYPES = {
         "TCSS": "TriggerCascadeNoStoreWithStringKey"
         }
 
-# EMBEDDING_DIM = 1024
+EMBEDDING_DIM = 1024
 NUM_CENTROIDS = 3 # TODO: temp start with 3 clusters
 NUM_EMB_PER_CENTROIDS = 100
+NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
+
+
+def generate_random_embeddings(d=64, num_embs=100):
+    '''
+    Load the embeddings from pickle files
+    '''
+    xb = np.random.random((num_embs, d)).astype('float32')
+    xb[:, 0] += np.arange(num_embs) / 1000.
+    return xb
 
 
 def create_object_pool(capi, basepath):

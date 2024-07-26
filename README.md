@@ -54,7 +54,7 @@ centroids stored in the format of /rag/emb/centroids_obj/[obj_id], e.g. /rag/emb
 
 cluster embeddings stored in the format of /rag/emb/cluster[cluster_id]/[obj_id], e.g. /rag/emb/cluster1/0, /rag/emb/cluster2/0
 
-Note that because we use these keys as identifier to the embeddings object, if other put have the same prefix put to Cascade, it may cause unexpected behaviour ([TODO] sanity check this) 
+Note that because we use these keys as identifier to the embeddings object, if accidentally put other objects with the same prefix put to Cascade, it could cause unexpected knn search result. 
 
 - documents: stored in cascade as KV objects under /rag/doc object pool. Document objects' keys are in the format of /rag/doc/[cluster_id]-[emb_id]
 
@@ -71,7 +71,9 @@ We wrote an example query using cascade python client API, ```client_query.py```
 
 
 ### 4. Performance test
-For performance testing, we created client side test scripts. ```perf_test_setup.py``` (for initialize the vector database) and ```perf_test_client.py```(for putting queries). The configuration of the test is defined in ```config.h.in``` . The dataset used for perf_test could be download from directory /erf_data, by running ```./download_testset.sh```
+For performance testing, we created client side test scripts under the folder ```/perf_test```. ```perf_test_setup.py``` (for initialize the vector database) and ```perf_test_client.py```(for putting queries). The configuration of the test is defined in ```perf_config.py``` . The dataset used for perf_test could be download from directory ```/perf_test/perf_data```, by running ```./download_testset.sh```
+
+Start the test in node n2, by running ```python perf_test/perf_test_setup.py```, then running ```python perf_test/perf_test_client.py```.
 
 # Docker image
 We have built a docker image that have nvcc and cascade,derecho built setup. You can pull from the docker image and run it on your environment.

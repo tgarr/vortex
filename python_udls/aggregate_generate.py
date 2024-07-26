@@ -11,9 +11,11 @@ import json
 import pickle
 import re
 import time
-from perf_config import *
+from logging_tags import *
 import torch
 from collections import OrderedDict
+import logging
+logging.basicConfig(level=logging.ERROR)
 # if INCLUDE_RUNNING_LLM == 1:
 #      import transformers
 
@@ -60,7 +62,7 @@ class ClusterSearchResults:
                del cluster_search_results["query_text"]
           # 1. add the cluster search results to the cluster_results
           if cluster_id in self.cluster_results:
-               print(f"[AggregateGenerateUDL] add_cluster_result: cluster_id {cluster_id} already in ClusterSearchResults")
+               logging.error(f"[AggregateGenerateUDL] add_cluster_result: cluster_id {cluster_id} already in ClusterSearchResults")
           self.cluster_results[cluster_id] = cluster_search_results
           if len(self.cluster_results) == self.cluster_counts:
                self.agg_top_k_res = self.select_top_k()
@@ -93,19 +95,19 @@ class AggregateGenerateUDL(UserDefinedLogic):
           self.conf = json.loads(conf_str)
           self.top_k = int(self.conf["top_k"])
           self.top_num_centroids = int(self.conf["top_num_centroids"])
+          self.include_llm = int(self.conf["include_llm"])
           self.capi = ServiceClientAPI()
           self.my_id = self.capi.get_my_id()
           self.tl = TimestampLogger()
           # docs parameters
-          self.doc_file_name = './perf_data/miniset/doc_list.pickle'
-          self.answer_mapping_file = './perf_data/miniset/answer_mapping.pickle'
+          self.doc_file_name = './perf_test/perf_data/miniset/doc_list.pickle'
+          self.answer_mapping_file = './perf_test/perf_data/miniset/answer_mapping.pickle'
           self.doc_list = None
           self.answer_mapping = None
           # LLM parameters
-          self.pipeline = None
-          self.terminators = None
-          # one server setting, gpu only host one model
-          if not self.my_id == 0 and INCLUDE_RUNNING_LLM == 1:
+          if self.include_llm == 1:
+               self.pipeline = None
+               self.terminators = None
                self.load_llm()
           
      
@@ -164,10 +166,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
                top_p=0.9,
           )
           raw_text = tmp_res[0]["generated_text"][-1]['content']
-          if PRINT_DEBUG_MESSAGE == 1:
-               query_text = query_doc_dict["query_text"]
-               print(f"for query:{query_text}")
-               print(f"the llm generated response: {raw_text}")   
+          query_text = query_doc_dict["query_text"]
+          logging.debug(f"for query:{query_text}")
+          logging.debug(f"the llm generated response: {raw_text}")   
           return raw_text
           
      
@@ -181,7 +182,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           match = re.match(r"_cluster(\d+)_qid([0-9a-fA-F]+)", key[pos:])
           if not match:
                # This also shouldn't happen becuase the format is done by encode_centroids_search_udl, and clusters_search_udl implemented by us
-               print(f"[AggregateGenerate] received an object (key:{key}) with invalid key format")
+               logging.error(f"[AggregateGenerate] received an object (key:{key}) with invalid key format")
                return
           cluster_id = int(match.group(1))
           qid = int(match.group(2),16) % 100000 # TODO: temp fix for qid by only using the last 5 digits
@@ -211,12 +212,11 @@ class AggregateGenerateUDL(UserDefinedLogic):
           # 3.1 if collected all result, retrieve documents and run llm
           
           next_key = "/rag/generate/" + key_without_runtime_info + "_result/" + "qid" + str(qid) 
-          print(f"AggregateGenerateUDL next key is {next_key}")
 
           self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, self.my_id, qid, 0)
           doc_list = self.retrieve_documents(self.cluster_search_res[query_text])
           self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, self.my_id, qid, 0)
-          if INCLUDE_RUNNING_LLM == 1:
+          if self.include_llm == 1:
                llm_result = self.llm_generate(sorted_client_query_batch_result)
                final_result_dict = {"query_text": query_text, "llm_result": llm_result}
                final_result_json = json.dumps(final_result_dict)
@@ -226,8 +226,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           # 3.2 save the result as KV object in cascade to be retrieved by client
           self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, self.my_id, qid, 0)
           self.capi.put(next_key, final_result_json.encode('utf-8'))
-          if PRINT_DEBUG_MESSAGE == 1:
-               print(f"[AggregateGenerate] put the agg_results to key:{next_key},\
+          logging.debug(f"[AggregateGenerate] put the agg_results to key:{next_key},\
                          \n                   value: {final_result_json}")
           self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, self.my_id, qid, 0)
           

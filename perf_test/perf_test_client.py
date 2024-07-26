@@ -9,8 +9,9 @@ import time
 from derecho.cascade.external_client import ServiceClientAPI
 from derecho.cascade.external_client import TimestampLogger
 
-
+from logging_tags import *
 from perf_config import *
+
 import logging
 logging.basicConfig(format='%(asctime)s %(name)16s[%(levelname)s] %(message)s')
 
@@ -90,8 +91,7 @@ def main(argv):
           tl.log(LOG_TAG_QUERIES_SENDING_START, client_id, querybatch_id, 0)
           capi.put(key, encoded_bytes)
           tl.log(LOG_TAG_QUERIES_SENDING_END, client_id, querybatch_id, 0)
-          if PRINT_DEBUG_MESSAGE:
-               print(f"Put queries to key:{key}, batch_size:{len(query_list)}")
+          logging.debug(f"Put queries to key:{key}, batch_size:{len(query_list)}")
 
           # Wait for result of this batch
           result_key = "/rag/generate/" + f"client{client_id}qb{querybatch_id}_results"
@@ -104,16 +104,14 @@ def main(argv):
                     if len(res_dict['value']) > 0:
                          result_generated = True
                          tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,0)
-                         if PRINT_DEBUG_MESSAGE == 1:
-                              # result dictionary format["query_id": (float(distance), int(cluster_id), int(emb_id)), "query_id":(...) ... ]
-                              print(f"Got result from key:{result_key}, value:{res_dict['value']}")
+                         # result dictionary format["query_id": (float(distance), int(cluster_id), int(emb_id)), "query_id":(...) ... ]
+                         logging.debug(f"Got result from key:{result_key}, value:{res_dict['value']}")
                else:
-                    if PRINT_DEBUG_MESSAGE == 1:
-                         print(f"Getting key:{result_key} with NULL result_future.")
+                    logging.debug(f"Getting key:{result_key} with NULL result_future.")
                time.sleep(RETRIEVE_WAIT_INTERVAL)
                wait_time += RETRIEVE_WAIT_INTERVAL
           if not result_generated:
-               print(f"Failed to get result for querybatch_id:{querybatch_id} after {MAX_RESULT_WAIT_TIME} seconds.")
+               logging.debug(f"Failed to get result for querybatch_id:{querybatch_id} after {MAX_RESULT_WAIT_TIME} seconds.")
           if (querybatch_id + 1) % PRINT_FINISH_INTEVAL == 0:
                print(f"Finished processing query_batch {querybatch_id}")
 

@@ -154,7 +154,13 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         uint32_t nq;
         std::vector<std::string> query_list;
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_START,my_id,query_batch_id,cluster_id);
-        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
+        try{
+            deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to deserialize the query embeddings and query texts from the object." << std::endl;
+            dbg_default_error("Failed to deserialize the query embeddings and query texts from the object, at centroids_search_udl.");
+            return;
+        }
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,my_id,query_batch_id,cluster_id);
 
         // 3. search the top K embeddings that are close to the query

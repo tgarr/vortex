@@ -24,7 +24,6 @@ std::string get_description() {
 
 class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
-    int my_id;
     std::unique_ptr<GroupedEmbeddingsForSearch> centroids_embs;
     bool cached_centroids_embs = false;
 
@@ -43,14 +42,12 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     ***/
     inline void combine_common_clusters(const long* I, const int nq, std::map<long, std::vector<int>>& cluster_ids_to_query_ids){
         for (int i = 0; i < nq; i++) {
-            std::cout << "at centroids search, top_num_centroids: " << top_num_centroids << std::endl;
             for (int j = 0; j < top_num_centroids; j++) {
                 long cluster_id = I[i * top_num_centroids + j];
                 if (cluster_ids_to_query_ids.find(cluster_id) == cluster_ids_to_query_ids.end()) {
                     cluster_ids_to_query_ids[cluster_id] = std::vector<int>();
                 }
                 cluster_ids_to_query_ids[cluster_id].push_back(i);
-                std::cout << "   for query " << i << ", cluster_id: " << cluster_id << std::endl;
             }
         }
     }
@@ -66,8 +63,10 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/centroids_search instead of /rag/emb, i.e. the objp name***/
         // Logging purpose for performance evaluation
         if (key_string == "flush_logs") {
-            std::string log_file_name = "node" + this->my_id + "_udls_timestamp.dat";
+            int my_id = typed_ctxt->get_service_client_ref().get_my_id();
+            std::string log_file_name = "node" + std::to_string(my_id) + "_udls_timestamp.dat";
             TimestampLogger::flush(log_file_name);
+            std::cout << "Flushed logs to " << log_file_name <<"."<< std::endl;
             return;
         }
         auto my_id = typed_ctxt->get_service_client_ref().get_my_id();
@@ -92,7 +91,13 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         uint32_t nq;
         std::vector<std::string> query_list;
         TimestampLogger::log(LOG_CENTROIDS_SEARCH_DESERIALIZE_START,my_id,query_batch_id,0);
-        deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
+        try{
+            deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to deserialize the query embeddings and query texts from the object." << std::endl;
+            dbg_default_error("Failed to deserialize the query embeddings and query texts from the object, at centroids_search_udl.");
+            return;
+        }
         TimestampLogger::log(LOG_CENTROIDS_SEARCH_DESERIALIZE_END,my_id,query_batch_id,0);
 
         // 2. search the top_num_centroids that are close to the query
@@ -162,8 +167,7 @@ public:
         return ocdpo_ptr;
     }
 
-    void set_config(DefaultCascadeContextType* typed_ctxt,const nlohmann::json& config){
-        this->my_id = typed_ctxt->get_service_client_ref().get_my_id();
+    void set_config(const nlohmann::json& config){
         try{
             if (config.contains("centroids_emb_prefix")) {
                 this->centroids_emb_prefix = config["centroids_emb_prefix"].get<std::string>();
@@ -192,9 +196,8 @@ void initialize(ICascadeContext* ctxt) {
 }
 
 std::shared_ptr<OffCriticalDataPathObserver> get_observer(
-        ICascadeContext* ctxt,const nlohmann::json& config) {
-    auto typed_ctxt = dynamic_cast<DefaultCascadeContextType*>(ctxt);
-    std::static_pointer_cast<CentroidsSearchOCDPO>(CentroidsSearchOCDPO::get())->set_config(typed_ctxt, config);
+        ICascadeContext*,const nlohmann::json& config) {
+    std::static_pointer_cast<CentroidsSearchOCDPO>(CentroidsSearchOCDPO::get())->set_config(config);
     return CentroidsSearchOCDPO::get();
 }
 

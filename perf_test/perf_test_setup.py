@@ -11,6 +11,8 @@ from perf_config import *
 
 np.random.seed(1234)             # make reproducible
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 OBJECT_POOLS_LIST = "setup/object_pools.list"
 
 SUBGROUP_TYPES = {
@@ -84,7 +86,7 @@ def put_initial_embeddings(capi, basepath):
     centroids_chunk_idx = break_into_chunks(centroids_embs.shape[0], NUM_EMB_PER_OBJ)
     print(f"number of centroids from pickle is {centroids_embs.shape[0]}")
     for i, (start_idx, end_idx) in enumerate(centroids_chunk_idx):
-        key = f"/rag/emb/centroids/{i}"
+        key = f"/rag/emb/centroids_obj/{i}"
         centroids_embs_chunk = centroids_embs[start_idx:end_idx]
         res = capi.put(key, centroids_embs_chunk.tobytes())
         if res:
@@ -117,8 +119,9 @@ def put_initial_embeddings(capi, basepath):
 def main(argv):
     print("Connecting to Cascade service ...")
     capi = ServiceClientAPI()
-    create_object_pool(capi, "./")
-    put_initial_embeddings(capi, "./perf_data/miniset/")
+    create_object_pool(capi, script_dir)
+    emb_dir = os.path.join(script_dir, "perf_data/miniset/")
+    put_initial_embeddings(capi, emb_dir)
     print("Done!")
 
 
