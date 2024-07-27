@@ -1,23 +1,44 @@
-
-
-inline int parse_batch_id(const std::string& key_string) {
+/***
+* Helper function for logging purpose, to extract the query information from the key
+* @param key_string the key string to extract the query information from
+* @param client_id the client id, output
+* @param batch_id the batch id, output
+* @return true if the query information is successfully extracted, false otherwise
+***/
+bool parse_batch_id(const std::string& key_string, int& client_id, int& batch_id) {
+     // Extract the number following "client"
+     size_t pos_client_id = key_string.find("client");
+     if (pos_client_id == std::string::npos) {
+          return false;
+     }
+     pos_client_id += 6;
+     std::string client_id_str;
+     while (pos_client_id < key_string.size() && std::isdigit(key_string[pos_client_id])) {
+          client_id_str += key_string[pos_client_id];
+          ++pos_client_id;
+     }
+     if (client_id_str.empty()) {
+          return false;
+     }
+     client_id = std::stoi(client_id_str);
+     // Extract the number following "qb"
      size_t pos = key_string.find("qb");
      if (pos == std::string::npos) {
-          return -1;
+          return false;
      }
      pos += 2; 
-     // Extract the number following "qb"
      std::string numberStr;
      while (pos < key_string.size() && std::isdigit(key_string[pos])) {
           numberStr += key_string[pos];
           ++pos;
      }
-     if (!numberStr.empty()) {
-          return std::stoi(numberStr);
+     if (numberStr.empty()) {
+          return false;
+          
      }
-     return -1;
+     batch_id = std::stoi(numberStr);
+     return true;
 }
-
 
 /*** 
 * Helper function to cdpo_handler()

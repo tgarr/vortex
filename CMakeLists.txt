@@ -17,7 +17,6 @@ find_package(Faiss REQUIRED)
 # Find CUDA Toolkit if using Faiss with GPU support
 find_package(CUDAToolkit REQUIRED)
 
-
 include(GNUInstallDirs)
 if (NOT DEFINED CMAKE_INSTALL_BINDIR)
     set(CMAKE_INSTALL_BINDIR bin)
@@ -40,6 +39,8 @@ target_include_directories(python_udl PRIVATE
 )
 target_link_libraries(python_udl cascade Python3::Python Python3::NumPy)
 
+# enable evaluation
+add_definitions(-DENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING})
 
 # Client log tags
 set(LOG_TAG_QUERIES_SENDING_START 10000)
@@ -67,7 +68,6 @@ target_include_directories(centroids_search_udl PRIVATE
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
 target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
-
 target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_START=${LOG_CENTROIDS_EMBEDDINGS_LOADING_START}
@@ -79,6 +79,7 @@ target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START}
     LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_END}
+    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
 # AGG GENERATE UDL tags
@@ -147,6 +148,7 @@ target_compile_definitions(clusters_search_udl PRIVATE
     LOG_CLUSTER_SEARCH_UDL_EMIT_START=${LOG_CLUSTER_SEARCH_UDL_EMIT_START}
     LOG_CLUSTER_SEARCH_UDL_EMIT_END=${LOG_CLUSTER_SEARCH_UDL_EMIT_END}
     LOG_CLUSTER_SEARCH_UDL_END=${LOG_CLUSTER_SEARCH_UDL_END}
+    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
 

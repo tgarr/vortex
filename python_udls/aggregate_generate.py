@@ -178,8 +178,8 @@ class AggregateGenerateUDL(UserDefinedLogic):
           pathname = kwargs["pathname"]
 
           pos = key.find("_cluster")
-          key_without_runtime_info = key[:pos]
-          match = re.match(r"_cluster(\d+)_qid([0-9a-fA-F]+)", key[pos:])
+          key_with_runtime_info = key[pos:]
+          match = re.match(r"_cluster(\d+)_qid([0-9a-fA-F]+)", key_with_runtime_info)
           if not match:
                # This also shouldn't happen becuase the format is done by encode_centroids_search_udl, and clusters_search_udl implemented by us
                logging.error(f"[AggregateGenerate] received an object (key:{key}) with invalid key format")
@@ -187,8 +187,17 @@ class AggregateGenerateUDL(UserDefinedLogic):
           cluster_id = int(match.group(1))
           qid = int(match.group(2),16) % 100000 # TODO: temp fix for qid by only using the last 5 digits
 
-          self.tl.log(LOG_TAG_AGG_UDL_START, self.my_id, qid, cluster_id)
-          
+          usable_logging_key = True
+          key_without_runtime_info = key[:pos]
+          match = re.match(r"client(\d+)qb([0-9a-fA-F]+)", key_without_runtime_info)
+          if not match:
+               usable_logging_key = False  
+               logging.error(f"[AggregateGenerate] received an object (key:{key}) with invalid key format that is not usable for logging purpose")
+          else:
+               client_id = int(match.group(1))
+               batch_id = int(match.group(2))
+          if usable_logging_key:
+               self.tl.log(LOG_TAG_AGG_UDL_START,client_id, batch_id, cluster_id)
 
           # 1. parse the blob to dict
           bytes_obj = blob.tobytes()
@@ -196,7 +205,8 @@ class AggregateGenerateUDL(UserDefinedLogic):
           cluster_result = json.loads(json_str_decoded)
           query_text = cluster_result["query_text"]
           
-          self.tl.log(LOG_TAG_AGG_UDL_FINISHED_PARSE, self.my_id, qid, cluster_id)
+          if usable_logging_key:
+               self.tl.log(LOG_TAG_AGG_UDL_FINISHED_PARSE, client_id, batch_id, cluster_id)
 
           # 2. add the cluster result to the aggregated query results
           if query_text not in self.cluster_search_res:
@@ -205,17 +215,18 @@ class AggregateGenerateUDL(UserDefinedLogic):
 
           self.cluster_search_res[query_text].add_cluster_result(cluster_id, cluster_result)
           if not self.cluster_search_res[query_text].collected_all_results:
-               self.tl.log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, self.my_id, qid, cluster_id)
+               if usable_logging_key:
+                    self.tl.log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, batch_id, cluster_id)
                return
-          self.tl.log(LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED, self.my_id, qid, 0)
 
           # 3.1 if collected all result, retrieve documents and run llm
-          
           next_key = "/rag/generate/" + key_without_runtime_info + "_result/" + "qid" + str(qid) 
 
-          self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, self.my_id, qid, 0)
+          if usable_logging_key:
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, client_id, batch_id, 0)
           doc_list = self.retrieve_documents(self.cluster_search_res[query_text])
-          self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, self.my_id, qid, 0)
+          if usable_logging_key:
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, batch_id, 0)
           if self.include_llm == 1:
                llm_result = self.llm_generate(sorted_client_query_batch_result)
                final_result_dict = {"query_text": query_text, "llm_result": llm_result}
@@ -224,11 +235,13 @@ class AggregateGenerateUDL(UserDefinedLogic):
                final_result_dict = {"query_text": query_text, "docs": doc_list}
                final_result_json = json.dumps(final_result_dict)
           # 3.2 save the result as KV object in cascade to be retrieved by client
-          self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, self.my_id, qid, 0)
+          if usable_logging_key:
+               self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, batch_id, 0)
           self.capi.put(next_key, final_result_json.encode('utf-8'))
           logging.debug(f"[AggregateGenerate] put the agg_results to key:{next_key},\
                          \n                   value: {final_result_json}")
-          self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, self.my_id, qid, 0)
+          if usable_logging_key:
+               self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, batch_id, 0)
           
 
      def __del__(self):
