@@ -196,8 +196,9 @@ class AggregateGenerateUDL(UserDefinedLogic):
           else:
                client_id = int(match.group(1))
                batch_id = int(match.group(2))
+               query_batch_id = batch_id * 100000 + qid
           if usable_logging_key:
-               self.tl.log(LOG_TAG_AGG_UDL_START,client_id, batch_id, cluster_id)
+               self.tl.log(LOG_TAG_AGG_UDL_START,client_id, query_batch_id, cluster_id)
 
           # 1. parse the blob to dict
           bytes_obj = blob.tobytes()
@@ -206,7 +207,7 @@ class AggregateGenerateUDL(UserDefinedLogic):
           query_text = cluster_result["query_text"]
           
           if usable_logging_key:
-               self.tl.log(LOG_TAG_AGG_UDL_FINISHED_PARSE, client_id, batch_id, cluster_id)
+               self.tl.log(LOG_TAG_AGG_UDL_FINISHED_PARSE, client_id, query_batch_id, cluster_id)
 
           # 2. add the cluster result to the aggregated query results
           if query_text not in self.cluster_search_res:
@@ -216,17 +217,17 @@ class AggregateGenerateUDL(UserDefinedLogic):
           self.cluster_search_res[query_text].add_cluster_result(cluster_id, cluster_result)
           if not self.cluster_search_res[query_text].collected_all_results:
                if usable_logging_key:
-                    self.tl.log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, batch_id, cluster_id)
+                    self.tl.log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, query_batch_id, cluster_id)
                return
 
           # 3.1 if collected all result, retrieve documents and run llm
           next_key = "/rag/generate/" + key_without_runtime_info + "_result/" + "qid" + str(qid) 
 
           if usable_logging_key:
-               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, client_id, batch_id, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, client_id, query_batch_id, qid)
           doc_list = self.retrieve_documents(self.cluster_search_res[query_text])
           if usable_logging_key:
-               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, batch_id, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, query_batch_id, qid)
           if self.include_llm == 1:
                llm_result = self.llm_generate(sorted_client_query_batch_result)
                final_result_dict = {"query_text": query_text, "llm_result": llm_result}
@@ -236,12 +237,12 @@ class AggregateGenerateUDL(UserDefinedLogic):
                final_result_json = json.dumps(final_result_dict)
           # 3.2 save the result as KV object in cascade to be retrieved by client
           if usable_logging_key:
-               self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, batch_id, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid)
           self.capi.put(next_key, final_result_json.encode('utf-8'))
           logging.debug(f"[AggregateGenerate] put the agg_results to key:{next_key},\
                          \n                   value: {final_result_json}")
           if usable_logging_key:
-               self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, batch_id, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid)
           
 
      def __del__(self):

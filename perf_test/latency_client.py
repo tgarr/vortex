@@ -101,7 +101,8 @@ def main(argv):
                          res_dict = result_future.get_result()
                          if len(res_dict['value']) > 0:
                               retrieved_queries.add(result_key)
-                              tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,0)
+                              qid = int(result_key.split("/")[-1][3:])
+                              tl.log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,client_id,querybatch_id,qid)
                               # result dictionary format["query_id": (float(distance), int(cluster_id), int(emb_id)), "query_id":(...) ... ]
                               logging.debug(f"Got result from key:{result_key}")
                     else:
