@@ -131,6 +131,9 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         ***/
         std::map<long, std::vector<int>> cluster_ids_to_query_ids = std::map<long, std::vector<int>>();
         combine_common_clusters(I, nq, cluster_ids_to_query_ids);
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+            TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,client_id,query_batch_id,this->my_id);
+#endif
         for (const auto& pair : cluster_ids_to_query_ids) {
             if (pair.first == -1) {
                 dbg_default_error( "Error: [CentroidsSearchOCDPO] for key: {} a selected cluster among top {}, has cluster_id -1", key_string, this->top_num_centroids);

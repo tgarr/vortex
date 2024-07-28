@@ -172,6 +172,9 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
         construct_new_keys(new_keys, key_string, query_list);
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END,client_id,query_batch_id,cluster_id);
+#endif
         int idx = 0;
         for (auto it = query_list.begin(); it != query_list.end(); ++it) {
             // 4.2 construct the cluster search result of query idx

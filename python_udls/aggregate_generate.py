@@ -119,15 +119,15 @@ class AggregateGenerateUDL(UserDefinedLogic):
           @return: The document string in natural language.
           """
           if self.answer_mapping is None:
-               self.tl.log(LOG_TAG_AGG_UDL_LOAD_ANSWER_START, self.my_id, 0, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_LOAD_ANSWER_START, self.my_id, 0, cluster_id)
                with open(self.answer_mapping_file, "rb") as file:
                     self.answer_mapping = pickle.load(file)
-               self.tl.log(LOG_TAG_AGG_UDL_LOAD_ANSWER_END, self.my_id, 0, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_LOAD_ANSWER_END, self.my_id, 0, cluster_id)
           if self.doc_list is None:
-               self.tl.log(LOG_TAG_AGG_UDL_LOAD_DOC_START, self.my_id, 0, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_LOAD_DOC_START, self.my_id, 0, cluster_id)
                with open(self.doc_file_name, 'rb') as file:
                     self.doc_list = pickle.load(file)
-               self.tl.log(LOG_TAG_AGG_UDL_LOAD_DOC_END, self.my_id, 0, 0)
+               self.tl.log(LOG_TAG_AGG_UDL_LOAD_DOC_END, self.my_id, 0, cluster_id)
           return self.doc_list[self.answer_mapping[cluster_id][ebd_id]]
           
 
