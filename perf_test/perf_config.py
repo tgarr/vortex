@@ -18,6 +18,7 @@ TOTAL_BATCH_COUNT = 10
 QUERY_PER_BATCH = 6
 MAX_RESULT_WAIT_TIME = 240 # seconds
 RETRIEVE_WAIT_INTERVAL = 0.5 # seconds
+LOG_WAIT_TIME = 10 # seconds
 PRINT_FINISH_INTEVAL = 100 # print a checkpoint after 100 batches 
 
 
