@@ -9,7 +9,6 @@ import time
 from derecho.cascade.external_client import ServiceClientAPI
 from derecho.cascade.external_client import TimestampLogger
 
-from logging_tags import *
 from perf_config import *
 
 import logging

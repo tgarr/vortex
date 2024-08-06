@@ -4,7 +4,7 @@
 #include <unordered_map>
 
 #include "grouped_embeddings_for_search.hpp"
-#include "utils.hpp"
+#include "rag_utils.hpp"
 
 
 namespace derecho{
@@ -107,7 +107,7 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to deserialize the query embeddings and query texts from the object." << std::endl;
-            dbg_default_error("Failed to deserialize the query embeddings and query texts from the object, at centroids_search_udl.");
+            dbg_default_error("{}, Failed to deserialize the query embeddings and query texts from the object.", __func__);
             return;
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING

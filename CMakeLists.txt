@@ -26,19 +26,6 @@ if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
     set(CMAKE_INSTALL_LIBDIR lib)
 endif()
 
-set(python_udl_VERSION 1.0)
-
-find_package(Python3 3.10.0 QUIET COMPONENTS Interpreter Development Development.Module Development.Embed NumPy)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
-add_library(python_udl SHARED python_udl.cpp)
-target_include_directories(python_udl PRIVATE
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-)
-target_link_libraries(python_udl cascade Python3::Python Python3::NumPy)
-
 # enable evaluation
 add_definitions(-DENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING})
 
@@ -84,39 +71,6 @@ target_compile_definitions(centroids_search_udl PRIVATE
     ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
-# AGG GENERATE UDL tags
-set(LOG_TAG_AGG_UDL_START 40000)
-set(LOG_TAG_AGG_UDL_FINISHED_PARSE 40001)
-set(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED 40010)
-set(LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED 40011)
-set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START 40020)
-set(LOG_TAG_AGG_UDL_LOAD_ANSWER_START 40120)
-set(LOG_TAG_AGG_UDL_LOAD_ANSWER_END 40121)
-set(LOG_TAG_AGG_UDL_LOAD_DOC_START 40220)
-set(LOG_TAG_AGG_UDL_LOAD_DOC_END 40221)
-set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END 40021)
-set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
-set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
-
-
-target_compile_definitions(python_udl PRIVATE
-    LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
-    LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
-    LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
-    LOG_TAG_AGG_UDL_START=${LOG_TAG_AGG_UDL_START}
-    LOG_TAG_AGG_UDL_FINISHED_PARSE=${LOG_TAG_AGG_UDL_FINISHED_PARSE}
-    LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED=${LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED}
-    LOG_TAG_AGG_UDL_RETRIEVE_DOC_START=${LOG_TAG_AGG_UDL_RETRIEVE_DOC_START}
-    LOG_TAG_AGG_UDL_LOAD_ANSWER_START=${LOG_TAG_AGG_UDL_LOAD_ANSWER_START}
-    LOG_TAG_AGG_UDL_LOAD_ANSWER_END=${LOG_TAG_AGG_UDL_LOAD_ANSWER_END}
-    LOG_TAG_AGG_UDL_LOAD_DOC_START=${LOG_TAG_AGG_UDL_LOAD_DOC_START}
-    LOG_TAG_AGG_UDL_LOAD_DOC_END=${LOG_TAG_AGG_UDL_LOAD_DOC_END}
-    LOG_TAG_AGG_UDL_RETRIEVE_DOC_END=${LOG_TAG_AGG_UDL_RETRIEVE_DOC_END}
-    LOG_TAG_AGG_UDL_PUT_RESULT_START=${LOG_TAG_AGG_UDL_PUT_RESULT_START}
-    LOG_TAG_AGG_UDL_PUT_RESULT_END=${LOG_TAG_AGG_UDL_PUT_RESULT_END}
-    LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
-)
-
 
 # Cluster Search tags
 set(LOG_CLUSTER_SEARCH_UDL_START 30000)
@@ -155,26 +109,64 @@ target_compile_definitions(clusters_search_udl PRIVATE
     ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
+# AGG GENERATE UDL tags
+set(LOG_TAG_AGG_UDL_START 40000)
+set(LOG_TAG_AGG_UDL_FINISHED_PARSE 40001)
+set(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED 40010)
+set(LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED 40011)
+set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START 40020)
+set(LOG_TAG_AGG_UDL_LOAD_ANSWER_START 40120)
+set(LOG_TAG_AGG_UDL_LOAD_ANSWER_END 40121)
+set(LOG_TAG_AGG_UDL_LOAD_DOC_START 40220)
+set(LOG_TAG_AGG_UDL_LOAD_DOC_END 40221)
+set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END 40021)
+set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
+set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
+
+add_library(aggregate_generate_udl SHARED aggregate_generate_udl.cpp)
+target_include_directories(aggregate_generate_udl PRIVATE
+    ${FAISS_INCLUDE_DIRS}
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+)
+target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade)
+
+target_compile_definitions(aggregate_generate_udl PRIVATE
+    LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
+    LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
+    LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
+    LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
+    LOG_TAG_AGG_UDL_START=${LOG_TAG_AGG_UDL_START}
+    LOG_TAG_AGG_UDL_FINISHED_PARSE=${LOG_TAG_AGG_UDL_FINISHED_PARSE}
+    LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED=${LOG_TAG_AGG_UDL_QUERY_FINISHED_GATHERED}
+    LOG_TAG_AGG_UDL_RETRIEVE_DOC_START=${LOG_TAG_AGG_UDL_RETRIEVE_DOC_START}
+    LOG_TAG_AGG_UDL_LOAD_ANSWER_START=${LOG_TAG_AGG_UDL_LOAD_ANSWER_START}
+    LOG_TAG_AGG_UDL_LOAD_ANSWER_END=${LOG_TAG_AGG_UDL_LOAD_ANSWER_END}
+    LOG_TAG_AGG_UDL_LOAD_DOC_START=${LOG_TAG_AGG_UDL_LOAD_DOC_START}
+    LOG_TAG_AGG_UDL_LOAD_DOC_END=${LOG_TAG_AGG_UDL_LOAD_DOC_END}
+    LOG_TAG_AGG_UDL_RETRIEVE_DOC_END=${LOG_TAG_AGG_UDL_RETRIEVE_DOC_END}
+    LOG_TAG_AGG_UDL_PUT_RESULT_START=${LOG_TAG_AGG_UDL_PUT_RESULT_START}
+    LOG_TAG_AGG_UDL_PUT_RESULT_END=${LOG_TAG_AGG_UDL_PUT_RESULT_END}
+)
+
 
 configure_file(
-    "${PROJECT_SOURCE_DIR}/python_udls/logging_tags.py.in"
-    "${PROJECT_BINARY_DIR}/logging_tags.py"
+    "${PROJECT_SOURCE_DIR}/perf_test/perf_config.py.in"
+    "${PROJECT_BINARY_DIR}/perf_config.py"
 )
 
 add_custom_command(TARGET clusters_search_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/python_udls
-        ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/perf_test
-        ${CMAKE_CURRENT_BINARY_DIR}/perf_test
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/setup
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/perf_test
+        ${CMAKE_CURRENT_BINARY_DIR}/perf_test
     COMMAND ${CMAKE_COMMAND} -E rename
-        ${CMAKE_CURRENT_BINARY_DIR}/logging_tags.py
-        ${CMAKE_CURRENT_BINARY_DIR}/python_udls/logging_tags.py
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls/logging_tags.py
-        ${CMAKE_CURRENT_BINARY_DIR}/perf_test/logging_tags.py
+        ${CMAKE_CURRENT_BINARY_DIR}/perf_config.py
+        ${CMAKE_CURRENT_BINARY_DIR}/perf_test/perf_config.py
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
@@ -205,12 +197,6 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/client_query.py
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/client_query.py
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/python_udls
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/python_udls
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
@@ -223,14 +209,6 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/perf_test
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test
-    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/python_udls
-    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/python_udls
-    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n5/python_udls
-    # COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/python_udls
-    #     ${CMAKE_CURRENT_BINARY_DIR}/cfg/n6/python_udls
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
@@ -250,46 +228,6 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/layout.json.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/dfgs.json.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/udl_dlls.cfg.tmp
-            ${CMAKE_CURRENT_SOURCE_DIR}/python_udls 
             ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
     COMMENT "prepare cluster search configuration"
 )
-
-
-
-# make install
-install(TARGETS python_udl EXPORT cascade_python_udlTargets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-include(CMakePackageConfigHelpers)
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfigVersion.cmake"
-    VERSION ${python_udl_VERSION}
-    COMPATIBILITY AnyNewerVersion
-)
-
-export (EXPORT cascade_python_udlTargets
-    FILE "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlTargets.cmake"
-)
-
-set(ConfigPackageLocation ${CMAKE_INSTALL_LIBDIR}/cmake/cascade_python_udl)
-
-configure_package_config_file(cascade_python_udlConfig.cmake.in
-    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfig.cmake"
-    INSTALL_DESTINATION ${ConfigPackageLocation}
-    PATH_VARS CMAKE_INSTALL_LIBDIR ConfigPackageLocation
-)
-
-install(EXPORT cascade_python_udlTargets
-    FILE cascade_python_udlTargets.cmake
-    NAMESPACE derecho::
-    DESTINATION ${ConfigPackageLocation}
-)
-
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfig.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/cascade_python_udlConfigVersion.cmake"
-    DESTINATION ${ConfigPackageLocation}
-)
-
-set(INSTALLED_PYTHON_UDL_LIB_FILE "${CMAKE_INSTALL_LIBDIR}/$<TARGET_FILE_NAME:python_udl>")
-

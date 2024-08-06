@@ -11,8 +11,6 @@ from derecho.cascade.external_client import TimestampLogger
 
 from perf_config import *
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../python_udls')))
-from logging_tags import *
 
 import logging
 logging.basicConfig(level=logging.ERROR)
@@ -77,7 +75,7 @@ def main(argv):
           # [number of queries (4 bytes)  + query embeddings (d*number of queries bytes) + query list json (variable length)]
           encoded_bytes = num_queries_bytes + emb_list_bytes + query_list_json_bytes
           tl.log(LOG_TAG_QUERIES_SENDING_START, client_id, querybatch_id, 0)
-          capi.put_and_forget(key, encoded_bytes)
+          capi.put(key, encoded_bytes)
           tl.log(LOG_TAG_QUERIES_SENDING_END, client_id, querybatch_id, 0)
           logging.debug(f"Put queries to key:{key}, batch_size:{len(query_list)}")
 

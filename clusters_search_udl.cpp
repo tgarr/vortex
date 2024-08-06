@@ -1,14 +1,15 @@
-#include <cascade/user_defined_logic_interface.hpp>
-#include <cascade/utils.hpp>
-#include <cascade/cascade_interface.hpp>
 #include <memory>
 #include <map>
 #include <iostream>
 #include <unordered_map>
+
+#include <cascade/user_defined_logic_interface.hpp>
+#include <cascade/utils.hpp>
+#include <cascade/cascade_interface.hpp>
 #include <derecho/openssl/hash.hpp>
 
 #include "grouped_embeddings_for_search.hpp"
-#include "utils.hpp"
+#include "rag_utils.hpp"
 
 
 namespace derecho{
@@ -94,6 +95,24 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         }
     }
 
+    /***
+     * Format the search results for each query to send to the next UDL.
+     * The format is | top_k | embeding_id_vector | distance_vector | query_text |
+    ***/
+    std::string formate_emit_query_info(long* I, float* D, int idx, std::string& query_text){
+        std::string query_search_result;
+        std::string num_embs(4, '\0');  // denotes the number of embedding_ids and distances 
+        num_embs[0] = (this->top_k >> 24) & 0xFF;
+        num_embs[1] = (this->top_k >> 16) & 0xFF;
+        num_embs[2] = (this->top_k >> 8) & 0xFF;
+        num_embs[3] = this->top_k & 0xFF;
+        query_search_result = num_embs +\
+                            std::string(reinterpret_cast<const char*>(&I[idx * this->top_k]) , sizeof(long) * this->top_k) +\
+                            std::string(reinterpret_cast<const char*>(&D[idx * this->top_k]) , sizeof(float) * this->top_k) +\
+                            query_text;
+        return query_search_result;
+    }
+
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
                                const std::string& key_string,
@@ -153,7 +172,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             deserialize_embeddings_and_quries_from_bytes(object.blob.bytes,object.blob.size,nq,this->emb_dim,data,query_list);
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to deserialize the query embeddings and query texts from the object." << std::endl;
-            dbg_default_error("Failed to deserialize the query embeddings and query texts from the object, at centroids_search_udl.");
+            dbg_default_error("{}, Failed to deserialize the query embeddings and query texts from the object.", __func__);
             return;
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
@@ -168,7 +187,22 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
 #endif
 
-        // 4. emit the result to the subsequent UDL
+        std::cout << "Contents of array I:" << std::endl;
+        for (uint32_t i = 0; i < this->top_k * nq; ++i) {
+            std::cout << I[i] << " ";
+            if ((i + 1) % this->top_k == 0) {
+                std::cout << std::endl;
+            }
+        }
+        std::cout << "Contents of array D:" << std::endl;
+        for (uint32_t i = 0; i < this->top_k * nq; ++i) {
+            std::cout << D[i] << " ";
+            if ((i + 1) % this->top_k == 0) {
+                std::cout << std::endl;
+            }
+        }
+
+        // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
         construct_new_keys(new_keys, key_string, query_list);
@@ -177,14 +211,10 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #endif
         int idx = 0;
         for (auto it = query_list.begin(); it != query_list.end(); ++it) {
-            // 4.2 construct the cluster search result of query idx
-            nlohmann::json json_obj; // format it as {"emb_id1": distance1, ...}
-            for (int j = 0; j < this->top_k; j++) {
-                json_obj[std::to_string(I[idx * this->top_k + j])] = std::to_string(D[idx * this->top_k + j]);
-            }
-            json_obj["query_text"] = *it;
-            std::string json_str = json_obj.dump();
-            Blob blob(reinterpret_cast<const uint8_t*>(json_str.c_str()), json_str.size());
+            // 4.2 format the search result
+            std::string query_emit_content = formate_emit_query_info(I, D, idx, *it);
+            std::cout << "Emitting "<< idx <<" search result: " << query_emit_content << std::endl;
+            Blob blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
             // 4.3 emit the result
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,client_id,query_batch_id,cluster_id);
@@ -193,8 +223,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,client_id,query_batch_id,cluster_id);
 #endif
-            dbg_default_debug("[Cluster search ocdpo]: Emitted key:{} " ,new_keys[idx]);
             idx ++;
+            dbg_default_debug("[Cluster search ocdpo]: Emitted key:{} " ,new_keys[idx]);
         }
         delete[] I;
         delete[] D;
