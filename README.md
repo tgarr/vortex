@@ -44,7 +44,7 @@ In this repo of client and server configuration, we use node n2 as client node.
 ### 1. create object pools
 Initialize the service by creating object pools needed for this pipeline: /rag/emb, /rag/doc, /rag/generate. The configurations of these object pools are in ```/setup/object_pool.list```
 
-### 2. put embeddings
+### 2. put embeddings and documents
 Construct the vector database by putting centroids and clusters' embeddings and documents.
 
 #### Vector database Data Storage formats
@@ -56,9 +56,12 @@ cluster embeddings stored in the format of /rag/emb/cluster[cluster_id]/[obj_id]
 
 Note that because we use these keys as identifier to the embeddings object, if accidentally put other objects with the same prefix put to Cascade, it could cause unexpected knn search result. 
 
-- documents: stored in cascade as KV objects under /rag/doc object pool. Document objects' keys are in the format of /rag/doc/[cluster_id]-[emb_id]
+- documents: stored in cascade as KV objects under /rag/doc object pool in PCSS. Document objects' keys are in the format of [doc_path] = /rag/doc/[doc_identifier]
+
+- embeddings to document path table. To fetch the document on a given embedding from its cluster_id and embedding_id. We keep a table for each cluster. The table matches the embeddings of that cluster to their corresponding pathnames. Using this table, the stored documents could be retrieved as context for the LLM. The tables are stored in Cascade in K/V format, with key as /rag/doc/emb_doc_map/cluster[cluster_id], value is in json with emb_id, document_pathname.
 
 Step1 and step2 could be done by running ``` python setup.py ``` at client node, n4.
+
 
 ### 3. run UDLs
 After the vector database is constructed, clients could send batch of queries to cascade service. Queries are triggered by putting KV objects to its first UDL, encode_centroids_search_udl. 

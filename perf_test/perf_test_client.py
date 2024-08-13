@@ -74,10 +74,31 @@ def get_query_batch():
      return res_query_count_list
 
 
+def create_client_result_object_pool(capi, client_id):
+     """Create the result object pool for this client.
+
+     Args:
+          capi: The ServiceClientAPI object.
+          client_id: The client id.
+
+     Returns:
+          The object pool name.
+     """
+     object_pool_name = f"/rag/results/{client_id}"
+     res = capi.create_object_pool(object_pool_name, SUBGROUP_TYPES["VCSS"], 0, 0)
+     if res:
+          res.get_result()
+          logging.debug(f"Created object pool {object_pool_name}")
+     else:
+          logging.error(f"Failed to create object pool {object_pool_name}")
+          exit(1)
+
+
 def main(argv):
      capi = ServiceClientAPI()
      print("Connected to Cascade service ...")
      client_id = capi.get_my_id()
+     create_client_result_object_pool(capi, client_id)
      tl = TimestampLogger()
      query_batch_list = get_query_batch()
 

@@ -5,6 +5,7 @@ import os
 import pickle
 import sys
 import time
+import json
 from derecho.cascade.external_client import ServiceClientAPI
 
 from perf_config import *
@@ -20,6 +21,8 @@ SUBGROUP_TYPES = {
         "PCSS": "PersistentCascadeStoreWithStringKey",
         "TCSS": "TriggerCascadeNoStoreWithStringKey"
         }
+
+ANSWER_MAPPING = {}
 
 
 def create_object_pool(capi, basepath):
@@ -78,7 +81,7 @@ def break_into_chunks(num_embeddings, chunk_size):
     return chunk_idxs
 
     
-def put_initial_embeddings(capi, basepath):
+def put_initial_embeddings_docs(capi, basepath, doc_list_pathname = "doc_list.pickle"):
     print("Initialized: putting centroids and clusters' embeddings to cascade server ...")
     # 1. Put centroids'embeddings to cascade.
     centroid_file_name = 'validate_first_100_centroids.pickle'
@@ -96,7 +99,9 @@ def put_initial_embeddings(capi, basepath):
             print(f"Failed to put the centroids embeddings to key: {key}")
             exit(1)
 
-    # 2. Put clusters' embeddings to cascade.
+    doc_list = pickle.load(open(os.path.join(basepath, doc_list_pathname), "rb"))
+    global ANSWER_MAPPING
+    # 2. Put clusters' embeddings and docs to cascade.
     centroid_count = centroids_embs.shape[0]
     cluster_file_name_list = [f'validate_first_100_ebd_doc_{count}.pickle' for count in range(centroid_count)]
     for cluster_id, cluster_file_name in enumerate(cluster_file_name_list):
@@ -113,15 +118,44 @@ def put_initial_embeddings(capi, basepath):
             else:
                 print(f"Failed to put the cluster embeddings to key: {key}")
                 exit(1)
-    print(f"Initialized")
+        # Put the corresponding docs to cascade
+        for emb_idx in range(num_embeddings):
+            doc_idx = ANSWER_MAPPING[cluster_id][emb_idx]
+            doc_key = f"/rag/doc/{doc_idx}"
+            doc = doc_list[doc_idx]
+            res = capi.put(doc_key, doc.encode('utf-8'))
+            if res:
+                res.get_result()
+            else:
+                print(f"Failed to put the doc to key: {doc_key}")
+                exit(1)
+        print(f"Put cluster{cluster_id} docs to cascade")
+    print(f"Initialized embeddings")
+
+
+def put_doc_tables(capi, basepath, file_name):
+    global ANSWER_MAPPING
+    ANSWER_MAPPING = pickle.load(open(os.path.join(basepath, file_name), "rb"))
+    print("Initialized: putting doc tables to cascade server ...")
+    for i, (cluster_id, table_dict) in enumerate(ANSWER_MAPPING.items()):
+        key = f"/rag/doc/emb_doc_map/cluster{cluster_id}"
+        table_json = json.dumps(table_dict)
+        res = capi.put(key, table_json.encode('utf-8'))
+        if res:
+            res.get_result()
+        else:
+            print(f"Failed to put the doc table to key: {key}")
+            exit(1)
+    print(f"Initialized tables")
 
 
 def main(argv):
     print("Connecting to Cascade service ...")
     capi = ServiceClientAPI()
     create_object_pool(capi, script_dir)
-    emb_dir = os.path.join(script_dir, "perf_data/miniset/")
-    put_initial_embeddings(capi, emb_dir)
+    data_dir = os.path.join(script_dir, "perf_data/miniset/")
+    put_doc_tables(capi, data_dir, "answer_mapping.pickle")
+    put_initial_embeddings_docs(capi, data_dir,doc_list_pathname = "doc_list.pickle")
     print("Done!")
 
 

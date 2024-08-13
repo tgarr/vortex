@@ -40,6 +40,54 @@ bool parse_batch_id(const std::string& key_string, int& client_id, int& batch_id
      return true;
 }
 
+
+inline bool parse_cluster_id(const std::string& key_string, int& cluster_id){
+     size_t pos = key_string.find("cluster");
+     if (pos == std::string::npos) {
+          return false;
+     }
+     pos += 7;
+     std::string cluster_id_str;
+     while (pos < key_string.size() && std::isdigit(key_string[pos])) {
+          cluster_id_str += key_string[pos];
+          ++pos;
+     }
+     if (cluster_id_str.empty()) {
+          return false;
+     }
+     cluster_id = std::stoi(cluster_id_str);
+     return true;
+}
+
+inline bool parse_client_id(const std::string& key_string, int& client_id) {
+     // Extract the number following "client"
+     size_t pos_client_id = key_string.find("client");
+     if (pos_client_id == std::string::npos) {
+          return false;
+     }
+     pos_client_id += 6;
+     std::string client_id_str;
+     while (pos_client_id < key_string.size() && std::isdigit(key_string[pos_client_id])) {
+          client_id_str += key_string[pos_client_id];
+          ++pos_client_id;
+     }
+     if (client_id_str.empty()) {
+          return false;
+     }
+     client_id = std::stoi(client_id_str);
+     return true;
+}
+
+inline bool parse_hashed_qid(const std::string& key_string, std::string qid){
+     size_t pos = key_string.find("_qid");
+     if (pos == std::string::npos) {
+          return false;
+     }
+     pos += 4;
+     qid = key_string.substr(pos);
+     return true;
+}
+
 /*** 
 * Helper function to cdpo_handler()
 * @param bytes the bytes object to deserialize

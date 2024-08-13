@@ -45,6 +45,7 @@ def get_queries(basepath, filename, batch_id):
      return query_list[QUERY_PER_BATCH * batch_id : QUERY_PER_BATCH * (batch_id + 1)]
 
 
+# TODO: use OpenAI api to get the actual embeddings
 def generate_random_embeddings(d=64, num_embs=100):
     '''
     Load the embeddings from pickle files
@@ -54,11 +55,31 @@ def generate_random_embeddings(d=64, num_embs=100):
     return xb
 
 
+def create_client_result_object_pool(capi, client_id):
+     """Create the result object pool for this client.
+
+     Args:
+          capi: The ServiceClientAPI object.
+          client_id: The client id.
+
+     Returns:
+          The object pool name.
+     """
+     object_pool_name = f"/rag/results/{client_id}"
+     res = capi.create_object_pool(object_pool_name, SUBGROUP_TYPES["VCSS"], 0)
+     if res:
+          res.get_result()
+          logging.debug(f"Created object pool {object_pool_name}")
+     else:
+          logging.error(f"Failed to create object pool {object_pool_name}")
+          exit(1)
+
 
 def main(argv):
      capi = ServiceClientAPI()
      print("Connected to Cascade service ...")
      client_id = capi.get_my_id()
+     create_client_result_object_pool(capi, client_id)
      tl = TimestampLogger()
 
      for querybatch_id in range(TOTAL_BATCH_COUNT):

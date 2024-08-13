@@ -3,6 +3,7 @@
 #include <map>
 #include <iostream>
 #include <queue>
+#include <tuple>
 #include <unordered_map>
 
 
@@ -28,41 +29,43 @@ std::string get_description() {
 
 
 struct ClusterSearchResults{
-     const std::string query_text;
-     int total_cluster_num = 0;
-     std::vector<int> collected_cluster_ids;
-     bool collected_all_results = false;
-     int top_k = 0;
-     std::priority_queue<DocIndex> agg_cluster_results;
+    const std::string query_text;
+    int total_cluster_num = 0;
+    std::vector<int> collected_cluster_ids;
+    bool collected_all_results = false;
+    int top_k = 0;
+    // min heap to keep the top_k docIndex across clusters' results
+    std::priority_queue<DocIndex> agg_top_k_results;
 
-     ClusterSearchResults(const std::string& query_text, int total_cluster_num, int top_k): 
+    ClusterSearchResults(const std::string& query_text, int total_cluster_num, int top_k): 
                          query_text(query_text), total_cluster_num(total_cluster_num), top_k(top_k) {}
 
-     void add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results){
-          if(std::find(collected_cluster_ids.begin(), collected_cluster_ids.end(), cluster_id) != collected_cluster_ids.end()){
-               std::cerr << "ERROR: cluster id=" << cluster_id << " search result is already collected for query=" << this->query_text << std::endl;
-               dbg_default_error("{} received same cluster={} result for query={}.", __func__, cluster_id, this->query_text);
-               return;
-          }
-          this->collected_cluster_ids.push_back(cluster_id);
-          // Add the cluster_results to the min_heap, and keep the size of the heap to be top_k
-          for (const auto& doc_index : cluster_results) {
-               if (static_cast<int>(agg_cluster_results.size()) < top_k) {
-                    agg_cluster_results.push(doc_index);
-               } else if (doc_index < agg_cluster_results.top()) {
-                    agg_cluster_results.pop();
-                    agg_cluster_results.push(doc_index);
-               }
-          }
-     }
+    bool is_all_results_collected(){
+        if(static_cast<int>(collected_cluster_ids.size()) == total_cluster_num){
+            collected_all_results = true;
+        }
+        // print out the docIndex in the min heap for debugging
+        std::priority_queue<DocIndex> tmp = agg_top_k_results;
+        return collected_all_results;
+    }
 
-     bool is_all_results_collected(){
-          if(static_cast<int>(collected_cluster_ids.size()) == total_cluster_num){
-               collected_all_results = true;
-          }
-          return collected_all_results;
-     }
-
+    void add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results){
+        if(std::find(collected_cluster_ids.begin(), collected_cluster_ids.end(), cluster_id) != collected_cluster_ids.end()){
+            std::cerr << "ERROR: cluster id=" << cluster_id << " search result is already collected for query=" << this->query_text << std::endl;
+            dbg_default_error("{} received same cluster={} result for query={}.", __func__, cluster_id, this->query_text);
+            return;
+        }
+        this->collected_cluster_ids.push_back(cluster_id);
+        // Add the cluster_results to the min_heap, and keep the size of the heap to be top_k
+        for (const auto& doc_index : cluster_results) {
+            if (static_cast<int>(agg_top_k_results.size()) < top_k) {
+                agg_top_k_results.push(doc_index);
+            } else if (doc_index < agg_top_k_results.top()) {
+                agg_top_k_results.pop();
+                agg_top_k_results.push(doc_index);
+            }
+        }
+    }
 };
 
 class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
@@ -71,7 +74,73 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
     int top_num_centroids = 4; // number of top K clusters need to wait to gather for each query
     int include_llm = false; // 0: not include, 1: include
 
+    std::unordered_map<int, std::unordered_map<long, std::string>> doc_tables; // cluster_id -> emb_index -> pathname
+    /*** TODO: use a more efficient way to store the doc_contents cache */
+    std::unordered_map<int,std::unordered_map<long, std::string>> doc_contents; // {cluster_id0:{ emb_index0: doc content0, ...}, cluster_id1:{...}, ...}
+    std::unordered_map<std::string, std::unique_ptr<ClusterSearchResults>> query_results; // query_text -> ClusterSearchResults
+
+
     int my_id; // the node id of this node; logging purpose
+
+
+    bool load_doc_table(DefaultCascadeContextType* typed_ctxt, int cluster_id){
+        if (doc_tables.find(cluster_id) != doc_tables.end()) {
+            return true;
+        }
+        std::string table_key = "/rag/doc/emb_doc_map/cluster" + std::to_string(cluster_id);
+        auto get_query_results = typed_ctxt->get_service_client_ref().get(table_key);
+        auto& reply = get_query_results.get().begin()->second.get();
+        if (reply.blob.size == 0) {
+            std::cerr << "Error: failed to get the doc table for cluster_id=" << cluster_id << std::endl;
+            dbg_default_error("Failed to get the doc table for cluster_id={}.", cluster_id);
+            return false;
+        }
+        char* json_data = const_cast<char*>(reinterpret_cast<const char*>(reply.blob.bytes));
+        std::string json_str(json_data, reply.blob.size);
+        try{
+            nlohmann::json doc_table_json = nlohmann::json::parse(json_str);
+            for (const auto& [emb_index, pathname] : doc_table_json.items()) {
+                this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
+            }
+            return true;
+        } catch (const nlohmann::json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            dbg_default_error("{}, JSON parse error: {}", __func__, e.what());
+            return false;
+        }
+    }
+
+    bool get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc){
+        /*** TODO: Need more thinking here to make it more memory efficient!
+         */
+        if (doc_contents.find(cluster_id) != doc_contents.end()) {
+            if (doc_contents[cluster_id].find(emb_index) != doc_contents[cluster_id].end()) {
+                res_doc = doc_contents[cluster_id][emb_index];
+                return true;
+            }
+        }
+        bool loaded_doc_table = load_doc_table(typed_ctxt, cluster_id);
+        if (!loaded_doc_table) {
+            std::cerr << "Error: failed to load the doc table for cluster_id=" << cluster_id << std::endl;
+            dbg_default_error("Failed to load the doc table for cluster_id={}.", cluster_id);
+            return false;
+        }
+        auto& pathname = doc_tables[cluster_id][emb_index];
+        auto get_doc_results = typed_ctxt->get_service_client_ref().get(pathname);
+        /*** TODO: catch error if result is empty */
+        // if (get_doc_results.get().empty()) {
+        //     std::cerr << "Error: failed to get the doc content for pathname=" << pathname << std::endl;
+        //     dbg_default_error("Failed to get the doc content for pathname={}.", pathname);
+        //     return;
+        // }
+        auto& reply = get_doc_results.get().begin()->second.get();
+        // parse the reply.blob.bytes to std::string
+        char* doc_data = const_cast<char*>(reinterpret_cast<const char*>(reply.blob.bytes));
+        std::string doc_str(doc_data, reply.blob.size);  // TODO: this is a copy, need to optimize
+        this->doc_contents[cluster_id][emb_index] = doc_str;
+        res_doc = this->doc_contents[cluster_id][emb_index];
+        return true;
+    }
 
 
     virtual void ocdpo_handler(const node_id_t sender,
@@ -81,10 +150,17 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
-        int cluster_id = 0; // TODO: change this
-        std::cout << key_string << std::endl;
+        // 0. parse the cluster_id from the key_string
+        int cluster_id; // TODO: change this
+        bool contain_cluster_id = parse_cluster_id(key_string, cluster_id);
+        if (!contain_cluster_id) {
+            std::cerr << "Error: failed to parse the cluster_id from the key_string." << std::endl;
+            dbg_default_error("Failed to parse the cluster_id from the key_string.");
+            return;
+        }
         std::string query_text;
         std::vector<DocIndex> cluster_results;
+        // 1. deserialize the cluster searched result from the object
         try{
             deserialize_cluster_search_result_from_bytes(cluster_id, object.blob.bytes, object.blob.size, query_text, cluster_results);
         } catch (const std::exception& e) {
@@ -92,10 +168,60 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("{}, Failed to deserialize the cluster searched result from the object.", __func__);
             return;
         }
-        for (const auto& doc_index : cluster_results) {
-            std::cout << doc_index << std::endl;
+        // 2. add the cluster_results to the query_results and check if all results are collected
+        if (query_results.find(query_text) == query_results.end()) {
+            query_results[query_text] = std::make_unique<ClusterSearchResults>(query_text, top_num_centroids, top_k);
         }
-        
+        query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
+        if (!query_results[query_text]->is_all_results_collected()) {
+            return;
+        }
+        // 3. All cluster results are collected for this query, aggregate the top_k results
+        auto& agg_top_k_results = query_results[query_text]->agg_top_k_results;
+        // 4. get the top_k docs content
+        std::vector<std::string> top_k_docs;
+        while (!agg_top_k_results.empty()) {
+            auto doc_index = agg_top_k_results.top();
+            agg_top_k_results.pop();
+            std::string res_doc;
+            bool find_doc = get_doc(typed_ctxt,cluster_id, doc_index.emb_id, res_doc);
+            if (!find_doc) {
+                std::cerr << "Error: failed to get the doc content for cluster_id=" << cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
+                dbg_default_error("Failed to get the doc content for cluster_id={} and emb_id={}.", cluster_id, doc_index.emb_id);
+                return;
+            }
+            top_k_docs.push_back(res_doc);
+        }
+        // 5. run LLM with the query and its top_k closest docs
+
+        // 6. put the result to cascade and notify the client
+        // convert the query and top_k_docs to a json object
+        nlohmann::json result_json;
+        result_json["query"] = query_text;
+        result_json["top_k_docs"] = top_k_docs;
+        std::string result_json_str = result_json.dump();
+        // put the result to cascade
+        std::string result_key = "/rag/results/";
+        int client_id;
+        bool contain_client_id = parse_client_id(key_string, client_id);
+        if (!contain_client_id) {
+            std::cerr << "Error: failed to parse the client_id from the key_string:" << key_string <<". No object pool to put the result." << std::endl;
+            dbg_default_error("Failed to parse the client_id from the key_string:{}.", key_string);
+            return;
+        } else{
+            result_key += std::to_string(client_id) + "/";
+        }
+        std::string qid;
+        bool contain_qid = parse_hashed_qid(key_string, qid);
+        if (!contain_qid) {
+            // This shouldn't happen because the qid is assigned at ClusterSearchUDL
+            std::cerr << "Error: failed to parse the qid from the key_string:"<< key_string << std::endl;
+            dbg_default_error("Failed to parse the qid from the key_string:{}.", key_string);
+            return;
+        }
+        result_key += qid;
+        ObjectWithStringKey result_obj(result_key, reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
+        typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;

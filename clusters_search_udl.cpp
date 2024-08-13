@@ -187,21 +187,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
 #endif
 
-        std::cout << "Contents of array I:" << std::endl;
-        for (uint32_t i = 0; i < this->top_k * nq; ++i) {
-            std::cout << I[i] << " ";
-            if ((i + 1) % this->top_k == 0) {
-                std::cout << std::endl;
-            }
-        }
-        std::cout << "Contents of array D:" << std::endl;
-        for (uint32_t i = 0; i < this->top_k * nq; ++i) {
-            std::cout << D[i] << " ";
-            if ((i + 1) % this->top_k == 0) {
-                std::cout << std::endl;
-            }
-        }
-
         // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
@@ -213,7 +198,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         for (auto it = query_list.begin(); it != query_list.end(); ++it) {
             // 4.2 format the search result
             std::string query_emit_content = formate_emit_query_info(I, D, idx, *it);
-            std::cout << "Emitting "<< idx <<" search result: " << query_emit_content << std::endl;
             Blob blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
             // 4.3 emit the result
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
