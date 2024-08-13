@@ -1,90 +1,72 @@
 /***
 * Helper function for logging purpose, to extract the query information from the key
 * @param key_string the key string to extract the query information from
-* @param client_id the client id, output
-* @param batch_id the batch id, output
-* @return true if the query information is successfully extracted, false otherwise
+* @param delimiter the delimiter to separate the number from the key string
+* @param number the number extracted from the key string
+* @note the function truncate the number string if it exceeds the length that an int can handle
 ***/
+bool parse_number(const std::string& key_string, const std::string& delimiter, int& number) {
+     size_t pos = key_string.find(delimiter);
+     if (pos == std::string::npos) {
+          return false;
+     }
+     pos += delimiter.size();
+     std::string number_str;
+     while (pos < key_string.size() && std::isdigit(key_string[pos])) {
+          number_str += key_string[pos];
+          ++pos;
+     }
+     if (number_str.empty()) {
+          return false;
+     }
+     /*** Truncate the number string to fit into an int if necessary
+     * down by 2 digits to make sure it doesn't out of range    
+     * TODO: better way to do this?     
+     */
+     constexpr size_t safe_digits = std::numeric_limits<int>::digits10 - 2; 
+     if (number_str.length() > safe_digits) {
+          number_str = number_str.substr(0, safe_digits); 
+     }
+     try {
+          number = std::stoi(number_str);  // Convert the truncated string to an int
+     } catch (const std::invalid_argument& e) {
+          std::cerr << "Failed to parse number from key: " << key_string << std::endl;
+          return false;
+     } 
+     return true;
+}
+
+
 bool parse_batch_id(const std::string& key_string, int& client_id, int& batch_id) {
-     // Extract the number following "client"
-     size_t pos_client_id = key_string.find("client");
-     if (pos_client_id == std::string::npos) {
+     if (!parse_number(key_string, "client", client_id)) {
+          std::cerr << "Failed to parse client_id from key: " << key_string << std::endl;
           return false;
      }
-     pos_client_id += 6;
-     std::string client_id_str;
-     while (pos_client_id < key_string.size() && std::isdigit(key_string[pos_client_id])) {
-          client_id_str += key_string[pos_client_id];
-          ++pos_client_id;
-     }
-     if (client_id_str.empty()) {
+     if (!parse_number(key_string, "qb", batch_id)) {
+          std::cerr << "Failed to parse batch_id from key: " << key_string << std::endl;
           return false;
      }
-     client_id = std::stoi(client_id_str);
-     // Extract the number following "qb"
-     size_t pos = key_string.find("qb");
-     if (pos == std::string::npos) {
-          return false;
-     }
-     pos += 2; 
-     std::string numberStr;
-     while (pos < key_string.size() && std::isdigit(key_string[pos])) {
-          numberStr += key_string[pos];
-          ++pos;
-     }
-     if (numberStr.empty()) {
-          return false;
-          
-     }
-     batch_id = std::stoi(numberStr);
      return true;
 }
 
 
-inline bool parse_cluster_id(const std::string& key_string, int& cluster_id){
-     size_t pos = key_string.find("cluster");
-     if (pos == std::string::npos) {
+bool parse_query_info(const std::string& key_string, int& client_id, int& batch_id, int& cluster_id, int& qid){
+     if (!parse_number(key_string, "client", client_id)) {
+          std::cerr << "Failed to parse client_id from key: " << key_string << std::endl;
           return false;
      }
-     pos += 7;
-     std::string cluster_id_str;
-     while (pos < key_string.size() && std::isdigit(key_string[pos])) {
-          cluster_id_str += key_string[pos];
-          ++pos;
-     }
-     if (cluster_id_str.empty()) {
+     if (!parse_number(key_string, "qb", batch_id)) {
+          std::cerr << "Failed to parse batch_id from key: " << key_string << std::endl;
           return false;
      }
-     cluster_id = std::stoi(cluster_id_str);
-     return true;
-}
-
-inline bool parse_client_id(const std::string& key_string, int& client_id) {
-     // Extract the number following "client"
-     size_t pos_client_id = key_string.find("client");
-     if (pos_client_id == std::string::npos) {
+     if (!parse_number(key_string, "_cluster", cluster_id)) {
+          std::cerr << "Failed to parse cluster_id from key: " << key_string << std::endl;
           return false;
      }
-     pos_client_id += 6;
-     std::string client_id_str;
-     while (pos_client_id < key_string.size() && std::isdigit(key_string[pos_client_id])) {
-          client_id_str += key_string[pos_client_id];
-          ++pos_client_id;
-     }
-     if (client_id_str.empty()) {
+     if (!parse_number(key_string, "_qid", qid)) {
+          std::cerr << "Failed to parse qid from key: " << key_string << std::endl;
           return false;
      }
-     client_id = std::stoi(client_id_str);
-     return true;
-}
-
-inline bool parse_hashed_qid(const std::string& key_string, std::string qid){
-     size_t pos = key_string.find("_qid");
-     if (pos == std::string::npos) {
-          return false;
-     }
-     pos += 4;
-     qid = key_string.substr(pos);
      return true;
 }
 

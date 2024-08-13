@@ -87,6 +87,9 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         if (doc_tables.find(cluster_id) != doc_tables.end()) {
             return true;
         }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_START, my_id, 0, cluster_id);
+#endif
         std::string table_key = "/rag/doc/emb_doc_map/cluster" + std::to_string(cluster_id);
         auto get_query_results = typed_ctxt->get_service_client_ref().get(table_key);
         auto& reply = get_query_results.get().begin()->second.get();
@@ -102,17 +105,18 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             for (const auto& [emb_index, pathname] : doc_table_json.items()) {
                 this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
             }
-            return true;
         } catch (const nlohmann::json::parse_error& e) {
             std::cerr << "JSON parse error: " << e.what() << std::endl;
             dbg_default_error("{}, JSON parse error: {}", __func__, e.what());
             return false;
         }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING     
+        TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_END, my_id, 0, cluster_id);
+#endif
+        return true;
     }
 
     bool get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc){
-        /*** TODO: Need more thinking here to make it more memory efficient!
-         */
         if (doc_contents.find(cluster_id) != doc_contents.end()) {
             if (doc_contents[cluster_id].find(emb_index) != doc_contents[cluster_id].end()) {
                 res_doc = doc_contents[cluster_id][emb_index];
@@ -125,20 +129,30 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to load the doc table for cluster_id={}.", cluster_id);
             return false;
         }
+        if (doc_tables[cluster_id].find(emb_index) == doc_tables[cluster_id].end()) {
+            std::cerr << "Error: failed to find the doc pathname for cluster_id=" << cluster_id << " and emb_id=" << emb_index << std::endl;
+            dbg_default_error("Failed to find the doc pathname for cluster_id={} and emb_id={}.", cluster_id, emb_index);
+            return false;
+        }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_START, this->my_id, emb_index, cluster_id);
+#endif 
         auto& pathname = doc_tables[cluster_id][emb_index];
         auto get_doc_results = typed_ctxt->get_service_client_ref().get(pathname);
-        /*** TODO: catch error if result is empty */
-        // if (get_doc_results.get().empty()) {
-        //     std::cerr << "Error: failed to get the doc content for pathname=" << pathname << std::endl;
-        //     dbg_default_error("Failed to get the doc content for pathname={}.", pathname);
-        //     return;
-        // }
         auto& reply = get_doc_results.get().begin()->second.get();
+        if (reply.blob.size == 0) {
+            std::cerr << "Error: failed to get the doc content for cluster_id=" << cluster_id << " and emb_id=" << emb_index << std::endl;
+            dbg_default_error("Failed to get the doc content for cluster_id={} and emb_id={}.", cluster_id, emb_index);
+            return false;
+        }
         // parse the reply.blob.bytes to std::string
         char* doc_data = const_cast<char*>(reinterpret_cast<const char*>(reply.blob.bytes));
-        std::string doc_str(doc_data, reply.blob.size);  // TODO: this is a copy, need to optimize
+        std::string doc_str(doc_data, reply.blob.size);  /*** TODO: this is a copy, need to optimize */
         this->doc_contents[cluster_id][emb_index] = doc_str;
         res_doc = this->doc_contents[cluster_id][emb_index];
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_END, this->my_id, emb_index, cluster_id);
+#endif
         return true;
     }
 
@@ -150,14 +164,18 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
-        // 0. parse the cluster_id from the key_string
-        int cluster_id; // TODO: change this
-        bool contain_cluster_id = parse_cluster_id(key_string, cluster_id);
-        if (!contain_cluster_id) {
-            std::cerr << "Error: failed to parse the cluster_id from the key_string." << std::endl;
-            dbg_default_error("Failed to parse the cluster_id from the key_string.");
+        // 0. parse the query information from the key_string
+        int client_id, cluster_id, batch_id, qid;
+        if (!parse_query_info(key_string, client_id, batch_id, cluster_id, qid)) {
+            std::cerr << "Error: failed to parse the query_info from the key_string:" << key_string << std::endl;
+            dbg_default_error("In {}, Failed to parse the query_info from the key_string:{}.", __func__, key_string);
             return;
         }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        int query_batch_id = batch_id * 100000 + qid % 100000; // cast down qid for logging purpose
+        TimestampLogger::log(LOG_TAG_AGG_UDL_START,client_id,query_batch_id,cluster_id);
+#endif
+        dbg_default_debug("[AggregateGenUDL] receive cluster search result from cluster{}.", cluster_id);
         std::string query_text;
         std::vector<DocIndex> cluster_results;
         // 1. deserialize the cluster searched result from the object
@@ -168,14 +186,23 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("{}, Failed to deserialize the cluster searched result from the object.", __func__);
             return;
         }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE, client_id, query_batch_id, cluster_id);
+#endif
         // 2. add the cluster_results to the query_results and check if all results are collected
         if (query_results.find(query_text) == query_results.end()) {
             query_results[query_text] = std::make_unique<ClusterSearchResults>(query_text, top_num_centroids, top_k);
         }
         query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
         if (!query_results[query_text]->is_all_results_collected()) {
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+            TimestampLogger::log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, query_batch_id, cluster_id);
+#endif
             return;
         }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, client_id, query_batch_id, cluster_id);
+#endif
         // 3. All cluster results are collected for this query, aggregate the top_k results
         auto& agg_top_k_results = query_results[query_text]->agg_top_k_results;
         // 4. get the top_k docs content
@@ -192,6 +219,9 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             }
             top_k_docs.push_back(res_doc);
         }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, query_batch_id, qid);
+#endif
         // 5. run LLM with the query and its top_k closest docs
 
         // 6. put the result to cascade and notify the client
@@ -201,27 +231,23 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         result_json["top_k_docs"] = top_k_docs;
         std::string result_json_str = result_json.dump();
         // put the result to cascade
-        std::string result_key = "/rag/results/";
-        int client_id;
-        bool contain_client_id = parse_client_id(key_string, client_id);
-        if (!contain_client_id) {
-            std::cerr << "Error: failed to parse the client_id from the key_string:" << key_string <<". No object pool to put the result." << std::endl;
-            dbg_default_error("Failed to parse the client_id from the key_string:{}.", key_string);
-            return;
-        } else{
-            result_key += std::to_string(client_id) + "/";
-        }
-        std::string qid;
-        bool contain_qid = parse_hashed_qid(key_string, qid);
-        if (!contain_qid) {
-            // This shouldn't happen because the qid is assigned at ClusterSearchUDL
-            std::cerr << "Error: failed to parse the qid from the key_string:"<< key_string << std::endl;
-            dbg_default_error("Failed to parse the qid from the key_string:{}.", key_string);
-            return;
-        }
-        result_key += qid;
+        std::string result_key = "/rag/results/" + std::to_string(client_id) + "/" + std::to_string(qid);
         ObjectWithStringKey result_obj(result_key, reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
-        typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
+        try{
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+            TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
+#endif
+            /*** TODO: catch here in case no object pool for /rag/result/client_id */
+            typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+            TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
+#endif
+            dbg_default_debug("[AggregateGenUDL] Put {} to cascade", result_key);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to put " << result_key << " to cascade."<< std::endl;
+            dbg_default_error("Failed to put {} to cascade.", result_key);
+            return;
+        }
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;

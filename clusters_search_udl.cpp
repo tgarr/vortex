@@ -77,13 +77,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         for (const auto& query : query_list) {
             std::string hashed_query;
             try {
+                /*** TODO: do we need 32 bytes of hashed key? will simply int be sufficient? */
                 uint8_t digest[32];
                 openssl::Hasher sha256(openssl::DigestAlgorithm::SHA256);
                 const char* query_cstr = query.c_str();
                 sha256.hash_bytes(query_cstr, strlen(query_cstr), digest);
                 std::ostringstream oss;
                 for (int i = 0; i < 32; ++i) {
-                    oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
+                    // Output each byte as a decimal value (0-255) without any leading zeros
+                    oss << std::dec << static_cast<int>(digest[i]);
                 }
                 hashed_query = oss.str();
             } catch(openssl::openssl_error& ex) {
