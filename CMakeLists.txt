@@ -178,18 +178,24 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/layout.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/layout.json
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/layout.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/dfgs.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/dfgs.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/dfgs.json
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/dfgs.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/udl_dlls.cfg
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/setup.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
@@ -210,18 +216,24 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/perf_test
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/run.sh 
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/clear_log.sh 
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/clear_log.sh
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cfg/run.sh.tmp
