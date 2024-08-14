@@ -248,6 +248,16 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to put {} to cascade.", result_key);
             return;
         }
+        // notify the client with the result
+        std::cout << "[AGGNotification ocdpo]: I(" << worker_id << ") received an object with key=" << key_string 
+                  << ", matching prefix=" << object_pool_pathname<< std::endl;
+        try {
+            Blob echo_blob(reinterpret_cast<const uint8_t*>(key_string.c_str()),key_string.size(),true);
+            typed_ctxt->get_service_client_ref().notify(echo_blob,object_pool_pathname,client_id);
+            std::cout << "[AGGnotification ocdpo]: echo back to node:" << client_id << std::endl;
+        } catch (derecho::derecho_exception& ex) {
+            std::cout << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
+        }
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
