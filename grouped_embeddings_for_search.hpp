@@ -151,6 +151,10 @@ public:
           return init_search_res;
      }
 
+     int get_num_embeddings(){
+          return this->num_embs;
+     }   
+
      int initialize_groupped_embeddings_for_search(){
           if (this->faiss_search_type == 0){
                initialize_cpu_flat_search();

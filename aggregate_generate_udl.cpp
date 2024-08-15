@@ -106,7 +106,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
                 this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
             }
         } catch (const nlohmann::json::parse_error& e) {
-            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            std::cerr << "Error: load_doc_table JSON parse error: " << e.what() << std::endl;
             dbg_default_error("{}, JSON parse error: {}", __func__, e.what());
             return false;
         }
@@ -116,7 +116,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         return true;
     }
 
-    bool get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc){
+    bool get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc, std::string query_text){
         if (doc_contents.find(cluster_id) != doc_contents.end()) {
             if (doc_contents[cluster_id].find(emb_index) != doc_contents[cluster_id].end()) {
                 res_doc = doc_contents[cluster_id][emb_index];
@@ -125,13 +125,12 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         }
         bool loaded_doc_table = load_doc_table(typed_ctxt, cluster_id);
         if (!loaded_doc_table) {
-            std::cerr << "Error: failed to load the doc table for cluster_id=" << cluster_id << std::endl;
             dbg_default_error("Failed to load the doc table for cluster_id={}.", cluster_id);
             return false;
         }
         if (doc_tables[cluster_id].find(emb_index) == doc_tables[cluster_id].end()) {
             std::cerr << "Error: failed to find the doc pathname for cluster_id=" << cluster_id << " and emb_id=" << emb_index << std::endl;
-            dbg_default_error("Failed to find the doc pathname for cluster_id={} and emb_id={}.", cluster_id, emb_index);
+            dbg_default_error("Failed to find the doc pathname for cluster_id={} and emb_id={}, query={}.", cluster_id, emb_index, query_text);
             return false;
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
@@ -211,7 +210,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             auto doc_index = agg_top_k_results.top();
             agg_top_k_results.pop();
             std::string res_doc;
-            bool find_doc = get_doc(typed_ctxt,cluster_id, doc_index.emb_id, res_doc);
+            bool find_doc = get_doc(typed_ctxt,cluster_id, doc_index.emb_id, res_doc, query_text);
             if (!find_doc) {
                 std::cerr << "Error: failed to get the doc content for cluster_id=" << cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
                 dbg_default_error("Failed to get the doc content for cluster_id={} and emb_id={}.", cluster_id, doc_index.emb_id);

@@ -189,6 +189,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
 #endif
         dbg_default_debug("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
+
+        // access each emb_id in I and check if it exceeds the total number of embeddings in the cluster
+        for (int i = 0; i < nq; i++) {
+            for (int j = 0; j < this->top_k; j++) {
+                if (I[i * this->top_k + j] >= embs->get_num_embeddings()) {
+                    dbg_default_error("Cluster {} has {} embeddings, but the search result has emb_id {} for query:{}.", cluster_id, embs->get_num_embeddings(), I[i * this->top_k + j], query_list[i]);
+                }
+            }
+        }
         // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
