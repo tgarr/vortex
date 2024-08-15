@@ -34,7 +34,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
-    int top_k = 4; // number of top K embeddings to search
+    uint32_t top_k = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
 
     int my_id; // the node id of this node; logging purpose
@@ -190,14 +190,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #endif
         dbg_default_debug("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
 
-        // access each emb_id in I and check if it exceeds the total number of embeddings in the cluster
-        for (int i = 0; i < nq; i++) {
-            for (int j = 0; j < this->top_k; j++) {
-                if (I[i * this->top_k + j] >= embs->get_num_embeddings()) {
-                    dbg_default_error("Cluster {} has {} embeddings, but the search result has emb_id {} for query:{}.", cluster_id, embs->get_num_embeddings(), I[i * this->top_k + j], query_list[i]);
-                }
-            }
-        }
         // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
@@ -249,7 +241,7 @@ public:
                 this->emb_dim = config["emb_dim"].get<int>();
             }
             if (config.contains("top_k")) {
-                this->top_k = config["top_k"].get<int>();
+                this->top_k = config["top_k"].get<uint32_t>();
             }
             if (config.contains("faiss_search_type")) {
                 this->faiss_search_type = config["faiss_search_type"].get<int>();

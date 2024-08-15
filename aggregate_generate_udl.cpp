@@ -116,7 +116,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         return true;
     }
 
-    bool get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc, std::string query_text){
+    bool get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc){
         if (doc_contents.find(cluster_id) != doc_contents.end()) {
             if (doc_contents[cluster_id].find(emb_index) != doc_contents[cluster_id].end()) {
                 res_doc = doc_contents[cluster_id][emb_index];
@@ -130,7 +130,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         }
         if (doc_tables[cluster_id].find(emb_index) == doc_tables[cluster_id].end()) {
             std::cerr << "Error: failed to find the doc pathname for cluster_id=" << cluster_id << " and emb_id=" << emb_index << std::endl;
-            dbg_default_error("Failed to find the doc pathname for cluster_id={} and emb_id={}, query={}.", cluster_id, emb_index, query_text);
+            dbg_default_error("Failed to find the doc pathname for cluster_id={} and emb_id={}, query={}.", cluster_id, emb_index);
             return false;
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
@@ -140,8 +140,8 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         auto get_doc_results = typed_ctxt->get_service_client_ref().get(pathname);
         auto& reply = get_doc_results.get().begin()->second.get();
         if (reply.blob.size == 0) {
-            std::cerr << "Error: failed to get the doc content for cluster_id=" << cluster_id << " and emb_id=" << emb_index << std::endl;
-            dbg_default_error("Failed to get the doc content for cluster_id={} and emb_id={}.", cluster_id, emb_index);
+            std::cerr << "Error: failed to cascade get the doc content for pathname=" << pathname << std::endl;
+            dbg_default_error("Failed to cascade get the doc content for pathname={}.", pathname);
             return false;
         }
         // parse the reply.blob.bytes to std::string
@@ -210,10 +210,10 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             auto doc_index = agg_top_k_results.top();
             agg_top_k_results.pop();
             std::string res_doc;
-            bool find_doc = get_doc(typed_ctxt,cluster_id, doc_index.emb_id, res_doc, query_text);
+            bool find_doc = get_doc(typed_ctxt,doc_index.cluster_id, doc_index.emb_id, res_doc);
             if (!find_doc) {
-                std::cerr << "Error: failed to get the doc content for cluster_id=" << cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
-                dbg_default_error("Failed to get the doc content for cluster_id={} and emb_id={}.", cluster_id, doc_index.emb_id);
+                std::cerr << "Error: failed to get_doc for cluster_id=" << cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
+                dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", cluster_id, doc_index.emb_id);
                 return;
             }
             top_k_docs.push_back(res_doc);
@@ -247,16 +247,16 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to put {} to cascade.", result_key);
             return;
         }
-        // notify the client with the result
-        std::cout << "[AGGNotification ocdpo]: I(" << worker_id << ") received an object with key=" << key_string 
-                  << ", matching prefix=" << object_pool_pathname<< std::endl;
-        try {
-            Blob echo_blob(reinterpret_cast<const uint8_t*>(key_string.c_str()),key_string.size(),true);
-            typed_ctxt->get_service_client_ref().notify(echo_blob,object_pool_pathname,client_id);
-            std::cout << "[AGGnotification ocdpo]: echo back to node:" << client_id << std::endl;
-        } catch (derecho::derecho_exception& ex) {
-            std::cout << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
-        }
+        // // notify the client with the result
+        // std::cout << "[AGGNotification ocdpo]: I(" << worker_id << ") received an object with key=" << key_string 
+        //           << ", matching prefix=" << object_pool_pathname<< std::endl;
+        // try {
+        //     Blob echo_blob(reinterpret_cast<const uint8_t*>(key_string.c_str()),key_string.size(),true);
+        //     typed_ctxt->get_service_client_ref().notify(echo_blob,object_pool_pathname,client_id);
+        //     std::cout << "[AGGnotification ocdpo]: echo back to node:" << client_id << std::endl;
+        // } catch (derecho::derecho_exception& ex) {
+        //     std::cout << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
+        // }
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
