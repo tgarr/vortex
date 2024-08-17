@@ -8,13 +8,13 @@ import time
 import json
 from derecho.cascade.external_client import ServiceClientAPI
 
-from perf_config import *
+
+NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
 
 np.random.seed(1234)             # make reproducible
-
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
-OBJECT_POOLS_LIST = "setup/object_pools.list"
+OBJECT_POOLS_LIST = "object_pools.list"
 
 SUBGROUP_TYPES = {
         "VCSS": "VolatileCascadeStoreWithStringKey",

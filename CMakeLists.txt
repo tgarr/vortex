@@ -29,10 +29,28 @@ endif()
 # enable evaluation
 add_definitions(-DENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING})
 
+
 # Client log tags
 set(LOG_TAG_QUERIES_SENDING_START 10000)
 set(LOG_TAG_QUERIES_SENDING_END 10001)
 set(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED 10100)
+
+add_executable(latency_client vortex_client/latency_client.cpp)
+target_include_directories(client PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+)
+target_link_libraries(latency_client cascade pthread)
+target_compile_definitions(latency_client PRIVATE
+    LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
+    LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
+    LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
+    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
+)
+
+
 
 # Centroids_search UDL tags
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_START 20000)
@@ -47,7 +65,7 @@ set(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START 20050)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END 20051)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_END 20100)
 
-add_library(centroids_search_udl SHARED centroids_search_udl.cpp)
+add_library(centroids_search_udl SHARED vortex_udls/centroids_search_udl.cpp)
 target_include_directories(centroids_search_udl PRIVATE
     ${FAISS_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
@@ -85,7 +103,7 @@ set(LOG_CLUSTER_SEARCH_UDL_EMIT_END 30051)
 set(LOG_CLUSTER_SEARCH_UDL_END 30100)
 
 
-add_library(clusters_search_udl SHARED clusters_search_udl.cpp)
+add_library(clusters_search_udl SHARED vortex_udls/clusters_search_udl.cpp)
 target_include_directories(clusters_search_udl PRIVATE
     ${FAISS_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
@@ -123,7 +141,7 @@ set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END 40021)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
 
-add_library(aggregate_generate_udl SHARED aggregate_generate_udl.cpp)
+add_library(aggregate_generate_udl SHARED vortex_udls/aggregate_generate_udl.cpp)
 target_include_directories(aggregate_generate_udl PRIVATE
     ${FAISS_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
@@ -134,9 +152,6 @@ target_include_directories(aggregate_generate_udl PRIVATE
 target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade)
 
 target_compile_definitions(aggregate_generate_udl PRIVATE
-    LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
-    LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
-    LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
     LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
     LOG_TAG_AGG_UDL_START=${LOG_TAG_AGG_UDL_START}
     LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE=${LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE}
@@ -150,28 +165,14 @@ target_compile_definitions(aggregate_generate_udl PRIVATE
     LOG_TAG_AGG_UDL_RETRIEVE_DOC_END=${LOG_TAG_AGG_UDL_RETRIEVE_DOC_END}
     LOG_TAG_AGG_UDL_PUT_RESULT_START=${LOG_TAG_AGG_UDL_PUT_RESULT_START}
     LOG_TAG_AGG_UDL_PUT_RESULT_END=${LOG_TAG_AGG_UDL_PUT_RESULT_END}
+    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
-
-configure_file(
-    "${PROJECT_SOURCE_DIR}/perf_test/perf_config.py.in"
-    "${PROJECT_BINARY_DIR}/perf_config.py"
-)
-
-add_custom_command(TARGET clusters_search_udl POST_BUILD
+add_custom_command(TARGET aggregate_generate_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/setup
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/perf_test
-        ${CMAKE_CURRENT_BINARY_DIR}/perf_test
-    COMMAND ${CMAKE_COMMAND} -E rename
-        ${CMAKE_CURRENT_BINARY_DIR}/perf_config.py
-        ${CMAKE_CURRENT_BINARY_DIR}/perf_test/perf_config.py
-    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/setup.py
-        ${CMAKE_CURRENT_BINARY_DIR}/
-    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/client_query.py
-        ${CMAKE_CURRENT_BINARY_DIR}/
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/layout.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
@@ -196,28 +197,12 @@ add_custom_command(TARGET clusters_search_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/udl_dlls.cfg
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/setup.py
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/setup.py
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup.py
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup.py
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/client_query.py
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/client_query.py
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/perf_test
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/perf_test
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_test
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_test/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
