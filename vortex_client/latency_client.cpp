@@ -8,6 +8,7 @@
 using namespace derecho::cascade;
 #define EMBEDDING_DIM 1024
 #define VORTEX_SUBGROUP_INDEX 0
+#define AGG_SUBGROUP_INDEX 0
 
 // Use vector since one query may be reuse for multiple times
 std::unordered_map<std::string, std::vector<std::tuple<int, int>>> sent_queries;
@@ -142,16 +143,15 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      }
 
      // 1.3. Establishing connections to all server nodes
-     auto subgroup_members = capi.template get_subgroup_members<VolatileCascadeStoreWithStringKey>(VORTEX_SUBGROUP_INDEX);
+     auto subgroup_members = capi.template get_subgroup_members<VolatileCascadeStoreWithStringKey>(AGG_SUBGROUP_INDEX);
      int num_shards = subgroup_members.size();
      std::string establish_key = "establish_connection";
      for (int i = 0; i < num_shards; i++) {
-          // auto res = capi.template get_shard_members<VolatileCascadeStoreWithStringKey>(VORTEX_SUBGROUP_INDEX, i);
           ObjectWithStringKey obj;
           std::string control_value = "establish";
           obj.key = establish_key;
           obj.blob = Blob(reinterpret_cast<const uint8_t*>(control_value.c_str()), control_value.size());
-          auto res = capi.template put<VolatileCascadeStoreWithStringKey>(obj, VORTEX_SUBGROUP_INDEX, i, true);
+          auto res = capi.template put<VolatileCascadeStoreWithStringKey>(obj, AGG_SUBGROUP_INDEX, i, true);
           for (auto& reply_future:res.get()) {
                reply_future.second.get(); // wait for the object has been put
           }
