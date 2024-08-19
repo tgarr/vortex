@@ -174,7 +174,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         int query_batch_id = batch_id * 100000 + qid % 100000; // cast down qid for logging purpose
         TimestampLogger::log(LOG_TAG_AGG_UDL_START,client_id,query_batch_id,cluster_id);
 #endif
-        dbg_default_debug("[AggregateGenUDL] receive cluster search result from cluster{}.", cluster_id);
+        dbg_default_trace("[AggregateGenUDL] receive cluster search result from cluster{}.", cluster_id);
         std::string query_text;
         std::vector<DocIndex> cluster_results;
         // 1. deserialize the cluster searched result from the object
@@ -241,7 +241,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
 #endif
-            dbg_default_debug("[AggregateGenUDL] Put {} to cascade", result_key);
+            dbg_default_trace("[AggregateGenUDL] Put {} to cascade", result_key);
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to put " << result_key << " to cascade."<< std::endl;
             dbg_default_error("Failed to put {} to cascade.", result_key);
@@ -251,7 +251,8 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         // std::cout << "[AGGNotification ocdpo]: I(" << worker_id << ") received an object with key=" << key_string 
         //           << ", matching prefix=" << object_pool_pathname<< std::endl;
         try {
-            typed_ctxt->get_service_client_ref().notify(result_obj.blob,object_pool_pathname,client_id);
+            std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
+            typed_ctxt->get_service_client_ref().notify(result_obj.blob,notification_pathname,client_id);
             std::cout << "[AGGnotification ocdpo]: echo back to node:" << client_id << std::endl;
         } catch (derecho::derecho_exception& ex) {
             std::cout << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;

@@ -123,7 +123,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
-        dbg_default_debug("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
+        dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         // 0. get the cluster ID
         int cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
         if (cluster_id == -1) {
@@ -188,13 +188,13 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
 #endif
-        dbg_default_debug("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
+        dbg_default_trace("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
 
         // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search
         std::vector<std::string> new_keys;
         construct_new_keys(new_keys, key_string, query_list);
-        dbg_default_debug("[Cluster search ocdpo] constructed new keys: {}.", key_string);
+        dbg_default_trace("[Cluster search ocdpo] constructed new keys: {}.", key_string);
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END,client_id,query_batch_id,cluster_id);
 #endif
@@ -211,7 +211,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,client_id,query_batch_id,cluster_id);
 #endif
-            dbg_default_debug("[Cluster search ocdpo]: Emitted key:{} " ,new_keys[idx]);
+            dbg_default_trace("[Cluster search ocdpo]: Emitted key:{} " ,new_keys[idx]);
             idx ++;
         }
         delete[] I;
@@ -219,7 +219,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_END,client_id,query_batch_id,cluster_id);
 #endif
-        dbg_default_debug("[Cluster search ocdpo]: FINISHED knn search for key: {}.", key_string );
+        dbg_default_trace("[Cluster search ocdpo]: FINISHED knn search for key: {}.", key_string );
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;

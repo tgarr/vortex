@@ -63,7 +63,7 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/centroids_search instead of /rag/emb, i.e. the objp name***/
-        dbg_default_debug("[Centroids search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
+        dbg_default_trace("[Centroids search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         // Logging purpose for performance evaluation
         if (key_string == "flush_logs") {
@@ -120,7 +120,14 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START,client_id,query_batch_id,this->my_id);
 #endif
-        this->centroids_embs->search(nq, data, this->top_num_centroids, D, I);
+        try{
+            this->centroids_embs->search(nq, data, this->top_num_centroids, D, I);
+        } catch (const std::exception& e) {
+            std::cerr << "Error: failed to search the top_num_centroids for the queries." << std::endl;
+            dbg_default_error("{}, Failed to search the top_num_centroids for the queries.", __func__);
+            return;
+        }
+
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END,client_id,query_batch_id,this->my_id);
 #endif
@@ -172,14 +179,14 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,client_id,query_batch_id,pair.first);
 #endif
-            dbg_default_debug("[Centroids search ocdpo]: Emitted key: {}",new_key);
+            dbg_default_trace("[Centroids search ocdpo]: Emitted key: {}",new_key);
         }
         delete[] I;
         delete[] D;
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,client_id,query_batch_id,this->my_id);
 #endif
-        dbg_default_debug("[Centroids search ocdpo]: FINISHED knn search for key: {}", key_string);
+        dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", key_string);
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;

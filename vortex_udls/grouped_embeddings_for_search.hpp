@@ -141,7 +141,7 @@ public:
                dbg_default_error("[{}]at {}, There is no embeddings for prefix{} in the KV store.", gettid(), __func__, embs_prefix);
                return -1;
           }
-          dbg_default_debug("[{}]: embs_prefix={}, num_emb_objects={} retrieved.", __func__, embs_prefix, num_retrieved_embs);
+          dbg_default_trace("[{}]: embs_prefix={}, num_emb_objects={} retrieved.", __func__, embs_prefix, num_retrieved_embs);
           
           // 2. assign the retrieved embeddings to the object
           this->num_embs = num_retrieved_embs;
@@ -202,7 +202,7 @@ public:
       * @param I: index array to store the index of the top_k embeddings
      ***/
      int faiss_cpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
-          dbg_default_debug("FAISS CPU flat Search in [GroupedEmbeddingsForSearch] class");
+          dbg_default_trace("FAISS CPU flat Search in [GroupedEmbeddingsForSearch] class");
           this->cpu_flatl2_index->search(nq, xq, top_k, D, I);
           return 0;
      }
@@ -227,7 +227,7 @@ public:
       * @param I: index array to store the index of the top_k embeddings
      ***/
      int faiss_gpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
-          dbg_default_debug("FAISS GPU flatl2 Search in [GroupedEmbeddingsForSearch] class" );
+          dbg_default_trace("FAISS GPU flatl2 Search in [GroupedEmbeddingsForSearch] class" );
           int k = top_k;
           this->gpu_flatl2_index->search(nq, xq, k, D, I);
           return 0;

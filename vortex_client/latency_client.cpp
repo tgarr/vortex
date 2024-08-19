@@ -9,6 +9,10 @@ using namespace derecho::cascade;
 #define EMBEDDING_DIM 1024
 #define VORTEX_SUBGROUP_INDEX 0
 
+// Use vector since one query may be reuse for multiple times
+std::unordered_map<std::string, std::vector<std::tuple<int, int>>> sent_queries;
+std::unordered_map<std::string, std::string> query_results;
+
 std::vector<std::string> read_queries(std::string query_director) {
      std::vector<std::string> queries;
      std::ifstream file(query_director);
@@ -64,6 +68,10 @@ std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::v
  * Result JSON is in format of : {"query": query_text, "top_k_docs":[doc_text1, doc_text2, ...]}
  */
 bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs) {
+     if (blob.size == 0) {
+          std::cerr << "Error: empty result blob." << std::endl;
+          return false;
+     }
      char* json_data = const_cast<char*>(reinterpret_cast<const char*>(blob.bytes));
      std::size_t json_size = blob.size;
      std::string json_string(json_data, json_size);
@@ -93,44 +101,62 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      std::cout << "Created object pool for results: " << result_pool_name << std::endl;
      // 1.2. Register notification for this object pool
      std::atomic<bool> running(true);
-     std::thread message_thread([&]() {
-          bool ret = capi.register_notification_handler(
-               [](const Blob& result) {
-                    std::cout << "Subgroup Notification received: "
-                              << "data: " << std::string(reinterpret_cast<const char*>(result.bytes), result.size)
-                              << std::endl;
+     bool ret = capi.register_notification_handler(
+               [&](const Blob& result){
+                    // std::cout << "Subgroup Notification received:"
+                    //       << "data:" << std::string(reinterpret_cast<const char*>(result.bytes),result.size)
+                    //       << std::endl;
+                    std::string query_text;
+                    std::vector<std::string> top_k_docs;
+                    if (!deserialize_result(result, query_text, top_k_docs)) {
+                         std::cerr << "Error: failed to deserialize the result from the notification." << std::endl;
+                         return false;
+                    }
+                    if (query_results.find(query_text) == query_results.end()) {
+                         query_results[query_text] = top_k_docs[0];
+                    }
+                    if (sent_queries.find(query_text) != sent_queries.end()) {
+                         for (auto& [qb_id, q_id]: sent_queries[query_text]) {
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+                              TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,qb_id,q_id);
+#endif
+                              std::cout << "Received result for query: " << query_text << " from client: " << my_id << " qb_id: " << qb_id << " q_id: " << q_id << std::endl;
+                              // remove [qb_id, q_id] from sent_queries
+                              sent_queries[query_text].erase(std::remove(sent_queries[query_text].begin(), sent_queries[query_text].end(), std::make_tuple(qb_id, q_id)), sent_queries[query_text].end());
+                              if (sent_queries[query_text].size() == 0) {
+                                   sent_queries.erase(query_text);
+                              }
+                              break;
+                         }
+                    } else {
+                         std::cerr << "Error: received result for query that is not sent." << std::endl;
+                    }
+                    if (sent_queries.size() == 0) {
+                         running = false;
+                         std::cout << "Received all results." << std::endl;
+                    }
                     return true;
                }, result_pool_name);
+     if (ret) {
+          std::cerr << "Replaced previous notification handler for obj_pool: " << result_pool_name << std::endl;
+     }
 
-          if (ret) {
-               std::cerr << "Notification handler registered for obj_pool: " << result_pool_name << std::endl;
+     // 1.3. Establishing connections to all server nodes
+     auto subgroup_members = capi.template get_subgroup_members<VolatileCascadeStoreWithStringKey>(VORTEX_SUBGROUP_INDEX);
+     int num_shards = subgroup_members.size();
+     std::string establish_key = "establish_connection";
+     for (int i = 0; i < num_shards; i++) {
+          // auto res = capi.template get_shard_members<VolatileCascadeStoreWithStringKey>(VORTEX_SUBGROUP_INDEX, i);
+          ObjectWithStringKey obj;
+          std::string control_value = "establish";
+          obj.key = establish_key;
+          obj.blob = Blob(reinterpret_cast<const uint8_t*>(control_value.c_str()), control_value.size());
+          auto res = capi.template put<VolatileCascadeStoreWithStringKey>(obj, VORTEX_SUBGROUP_INDEX, i, true);
+          for (auto& reply_future:res.get()) {
+               reply_future.second.get(); // wait for the object has been put
           }
+     }
 
-          while (running) {
-               // This thread could also be used to handle more events, instead of just sleeping
-               std::this_thread::sleep_for(std::chrono::seconds(1));
-          }
-     });
-     // bool ret = capi.register_notification_handler(
-     //           [](const Blob& result){
-     //                // std::string query_text;
-     //                // std::vector<std::string> top_k_docs;
-     //                // if (!deserialize_result(result, query_text, top_k_docs)) {
-     //                //      std::cerr << "Failed to deserialize the result object." << std::endl;
-     //                //      return false;
-     //                // }
-     //                // std::cout << "Received result for query: " << query_text << std::endl;
-     //                // for (const auto& doc_text:top_k_docs) {
-     //                //      std::cout << "Top doc: " << doc_text << std::endl;
-     //                // }
-     //                std::cout << "Subgroup Notification received:"
-     //                      << "data:" << std::string(reinterpret_cast<const char*>(result.bytes),result.size)
-     //                      << std::endl;
-     //                return true;
-     //           }, result_pool_name);
-     // if (ret) {
-     //      std::cerr << "Replaced previous notification handler for obj_pool: " << result_pool_name << std::endl;
-     // }
 
      // 2. Prepare the query
      std::vector<std::string> queries = read_queries(query_directory);
@@ -147,37 +173,50 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           std::vector<std::string> cur_query_list;
           for (int j = 0; j < batch_size; ++j) {
               cur_query_list.push_back(queries[(qb_id + j) % tatal_q_num]);
+              if (sent_queries.find(queries[(qb_id + j) % tatal_q_num]) == sent_queries.end()) {
+                   sent_queries[queries[(qb_id + j) % tatal_q_num]] = std::vector<std::tuple<int, int>>();
+              }
+              sent_queries[queries[(qb_id + j) % tatal_q_num]].push_back(std::make_tuple(qb_id, j));
           }
           // 3.2. Generate embedding for the query
           std::unique_ptr<float[]> query_embeddings;
-          generate_embeddings(EMBEDDING_DIM, num_queries, query_embeddings);
+          generate_embeddings(EMBEDDING_DIM, batch_size, query_embeddings);
           // 3.3. format the query 
-          std::string emb_query_string = format_query_emb_object(num_queries, query_embeddings, cur_query_list);
+          std::string emb_query_string = format_query_emb_object(batch_size, query_embeddings, cur_query_list);
           ObjectWithStringKey emb_query_obj;
           emb_query_obj.key = key;
           emb_query_obj.blob = Blob(reinterpret_cast<const uint8_t*>(emb_query_string.c_str()), emb_query_string.size());
           // 3.4. send the object to the cascade
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-          TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,my_id,qb_id,0);
+          for (int j = 0; j < batch_size; ++j) {
+               TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,my_id,qb_id,j);
+          }
 #endif
           capi.put_and_forget(emb_query_obj, false); // not only trigger the UDL, but also update state. TODO: Need more thinking here. 
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-          TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,my_id,qb_id,0);
+          for (int j = 0; j < batch_size; ++j) {
+               TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,my_id,qb_id,j);
+          }
 #endif
-
+          // std::this_thread::sleep_for(std::chrono::microseconds(query_interval));
+          // implement sleep using busy waiting and while loop
+          auto start = std::chrono::high_resolution_clock::now();
+          while (std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count() < query_interval) {
+               // busy waiting
+          }
      }
      
      std::cout << "Put all queries to cascade." << std::endl;
-     std::this_thread::sleep_for(std::chrono::seconds(10));
-     running = false;
-     message_thread.join();
+     // std::this_thread::sleep_for(std::chrono::seconds(10));
+     // running = false;
+     // message_thread.join();
+     while (running.load()) {
+          // std::this_thread::sleep_for(std::chrono::seconds(1));
+     }
 
      // 4. flush logs
      std::string flush_log_key = "/rag/emb/centroids_search/flush_logs";
-     auto subgroup_members = capi.template get_subgroup_members<VolatileCascadeStoreWithStringKey>(VORTEX_SUBGROUP_INDEX);
-     int num_shards = subgroup_members.size();
      for (int i = 0; i < num_shards; i++){
-          std::cout << i << std::endl;
           ObjectWithStringKey obj;
           std::string control_value = "flush";
           obj.key = flush_log_key;
@@ -197,7 +236,8 @@ int main(int argc, char** argv){
      int opt;
      int num_queries = 0;
      int batch_size = 0;
-     int query_interval = 1000000; // default interval between query is 1 second
+     // int query_interval = 100000; // default interval between query is 1 second
+     int query_interval = 50000;
      std::string query_directory = "";
 
      while ((opt = getopt(argc, argv, "n:b:q:")) != -1) {

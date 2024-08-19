@@ -93,7 +93,7 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
                     (static_cast<uint32_t>(bytes[1]) << 16) |
                     (static_cast<uint32_t>(bytes[2]) <<  8) |
                     (static_cast<uint32_t>(bytes[3]));
-     dbg_default_debug("In [{}],Number of queries: {}",__func__,nq);
+     dbg_default_trace("In [{}],Number of queries: {}",__func__,nq);
      // 1. get the emebddings of the queries from the blob object
      std::size_t float_array_start = 4;
      std::size_t float_array_size = sizeof(float) * emb_dim * nq;
@@ -158,7 +158,7 @@ void deserialize_cluster_search_result_from_bytes(const int& cluster_id,
                     (static_cast<uint32_t>(bytes[1]) << 16) |
                     (static_cast<uint32_t>(bytes[2]) <<  8) |
                     (static_cast<uint32_t>(bytes[3]));
-     dbg_default_debug("In [{}], cluster searched top_k: {}",__func__,cluster_selected_count);
+     dbg_default_trace("In [{}], cluster searched top_k: {}",__func__,cluster_selected_count);
      // 1. get the cluster searched top_k emb index vector (I) from the blob object
      std::size_t I_array_start = 4;
      std::size_t I_array_size = sizeof(long) * cluster_selected_count;
