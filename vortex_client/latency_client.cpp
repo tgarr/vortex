@@ -206,6 +206,9 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           while (std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count() < query_interval) {
                // busy waiting
           }
+          if (qb_id % 200 == 0) {
+               std::cout << "Sent " << qb_id << " queries." << std::endl;
+          }
      }
      
      std::cout << "Put all queries to cascade." << std::endl;
