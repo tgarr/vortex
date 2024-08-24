@@ -102,6 +102,7 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      std::cout << "Created object pool for results: " << result_pool_name << std::endl;
      // 1.2. Register notification for this object pool
      std::atomic<bool> running(true);
+     std::atomic<int> num_queries_to_send(num_queries);
      bool ret = capi.register_notification_handler(
                [&](const Blob& result){
                     // std::cout << "Subgroup Notification received:"
@@ -121,7 +122,7 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
                               TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,qb_id,q_id);
 #endif
-                              std::cout << "Received result for query: " << query_text << " from client: " << my_id << " qb_id: " << qb_id << " q_id: " << q_id << std::endl;
+                              // std::cout << "Received result for query: " << query_text << " from client: " << my_id << " qb_id: " << qb_id << " q_id: " << q_id << std::endl;
                               // remove [qb_id, q_id] from sent_queries
                               sent_queries[query_text].erase(std::remove(sent_queries[query_text].begin(), sent_queries[query_text].end(), std::make_tuple(qb_id, q_id)), sent_queries[query_text].end());
                               if (sent_queries[query_text].size() == 0) {
@@ -132,9 +133,9 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
                     } else {
                          std::cerr << "Error: received result for query that is not sent." << std::endl;
                     }
-                    if (sent_queries.size() == 0) {
+                    if (sent_queries.size() == 0 && num_queries_to_send.load() == 0) {
                          running = false;
-                         std::cout << "Received all results." << std::endl;
+                         // std::cout << "Received all results." << std::endl;
                     }
                     return true;
                }, result_pool_name);
@@ -198,6 +199,7 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,my_id,qb_id,j);
           }
 #endif
+          num_queries_to_send -= batch_size;
           // std::this_thread::sleep_for(std::chrono::microseconds(query_interval));
           // implement sleep using busy waiting and while loop
           auto start = std::chrono::high_resolution_clock::now();
