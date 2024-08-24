@@ -232,31 +232,33 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         // put the result to cascade
         std::string result_key = "/rag/results/" + std::to_string(client_id) + "/" + std::to_string(qid);
         ObjectWithStringKey result_obj(result_key, reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
-        try{
+        try {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
 #endif
-            /*** TODO: catch here in case no object pool for /rag/result/client_id */
-            typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
+            std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
+            typed_ctxt->get_service_client_ref().notify(result_obj.blob,notification_pathname,client_id);
+            dbg_default_trace("[AggregateGenUDL] echo back to node {}", client_id);
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
 #endif
-            dbg_default_trace("[AggregateGenUDL] Put {} to cascade", result_key);
-        } catch (const std::exception& e) {
-            std::cerr << "Error: failed to put " << result_key << " to cascade."<< std::endl;
-            dbg_default_error("Failed to put {} to cascade.", result_key);
-            return;
-        }
-        // notify the client with the result
-        // std::cout << "[AGGNotification ocdpo]: I(" << worker_id << ") received an object with key=" << key_string 
-        //           << ", matching prefix=" << object_pool_pathname<< std::endl;
-        try {
-            std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
-            typed_ctxt->get_service_client_ref().notify(result_obj.blob,notification_pathname,client_id);
-            std::cout << "[AGGnotification ocdpo]: echo back to node:" << client_id << std::endl;
         } catch (derecho::derecho_exception& ex) {
             std::cout << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
         }
+//         try{
+// #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+//             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
+// #endif
+//             typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
+// #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+//             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
+// #endif
+//             dbg_default_trace("[AggregateGenUDL] Put {} to cascade", result_key);
+//         } catch (const std::exception& e) {
+//             std::cerr << "Error: failed to put " << result_key << " to cascade."<< std::endl;
+//             dbg_default_error("Failed to put {} to cascade.", result_key);
+//             return;
+//         }
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;

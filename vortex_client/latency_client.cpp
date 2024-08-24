@@ -240,7 +240,7 @@ int main(int argc, char** argv){
      int query_interval = 50000;
      std::string query_directory = "";
 
-     while ((opt = getopt(argc, argv, "n:b:q:")) != -1) {
+     while ((opt = getopt(argc, argv, "n:b:q:i:")) != -1) {
           switch (opt) {
                case 'n':
                     num_queries = std::atoi(optarg);  // Convert the argument to an integer
