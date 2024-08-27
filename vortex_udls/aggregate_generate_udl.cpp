@@ -234,6 +234,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         ObjectWithStringKey result_obj(result_key, reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
         try {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+            /*** TODO: encode qid in result, so that the client could log the corresponding query ***/
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
 #endif
             std::string notification_pathname = "/rag/results/" + std::to_string(client_id);

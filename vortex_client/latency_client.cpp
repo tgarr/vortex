@@ -1,7 +1,7 @@
 #include <cascade/service_client_api.hpp>
 #include <chrono>
+#include <filesystem> 
 #include <iostream>
-#include <random>
 #include <unistd.h>  
 #include <vector>
 
@@ -9,43 +9,69 @@ using namespace derecho::cascade;
 #define EMBEDDING_DIM 1024
 #define VORTEX_SUBGROUP_INDEX 0
 #define AGG_SUBGROUP_INDEX 0
+#define QUERY_FILENAME "query.csv"
+#define QUERY_EMB_FILENAME "query_emb.csv"
 
 // Use vector since one query may be reuse for multiple times
 std::unordered_map<std::string, std::vector<std::tuple<int, int>>> sent_queries;
 std::unordered_map<std::string, std::string> query_results;
 
-std::vector<std::string> read_queries(std::string query_director) {
-     std::vector<std::string> queries;
-     std::ifstream file(query_director);
+int read_queries(std::filesystem::path query_filepath, int num_queries, int batch_size, std::vector<std::string>& queries) {
+     std::ifstream file(query_filepath);
      if (!file.is_open()) {
-          std::cerr << "Error: Could not open query directory:" << query_director << std::endl;
+          std::cerr << "Error: Could not open query directory:" << query_filepath << std::endl;
           std::cerr << "Current only support query_doc in csv format." << std::endl;
-          return queries;
+          return 0;
      }
      std::string line;
+     int num_query_collected = 0;
      while (std::getline(file, line)) {
+          if (num_query_collected >= num_queries * batch_size) {
+               break;
+          }
           queries.push_back(line);
+          num_query_collected++;
      }
      file.close();
-     return queries;
+     return num_query_collected;
 }
 
-std::mt19937 rng;
-/***
- * Generate randomly temporarily, 
- * TODO: use OpenAI API call to get the embeddings
- * @param d the dimension of the embeddings
- * @param nq the number of queries
- */
-bool generate_embeddings(int d, int nq, std::unique_ptr<float[]>& xq){
-     std::uniform_real_distribution<> distrib;
-     xq = std::make_unique<float[]>(d * nq);
-     for (int i = 0; i < nq; i++) {
-          for (int j = 0; j < d; j++)
-               xq[d * i + j] = distrib(rng);
-          xq[d * i] += i / 1000.;
+int read_query_embs(std::string query_emb_directory, int num_queries, int batch_size, std::unique_ptr<float[]>& query_embs){
+     std::unique_ptr<float[]> embs = std::make_unique<float[]>(EMBEDDING_DIM * num_queries * batch_size);
+     std::ifstream file(query_emb_directory);
+     if (!file.is_open()) {
+          std::cerr << "Error: Could not open query directory:" << query_emb_directory << std::endl;
+          std::cerr << "Current only support query_doc in csv format." << std::endl;
+          return 0;
      }
-     return true;
+     std::string line;
+     int num_query_collected = 0;
+     while (std::getline(file, line)) {
+          if (num_query_collected >= num_queries * batch_size) {
+               break;
+          }
+          std::istringstream ss(line);
+          std::string token;
+          int i = 0;
+          while (std::getline(ss, token, ',')) {
+               embs[num_query_collected * EMBEDDING_DIM + i] = std::stof(token);
+               i++;
+          }
+          if (i != EMBEDDING_DIM) {
+               std::cerr << "Error: query embedding dimension does not match." << std::endl;
+               return 0;
+          }
+          num_query_collected++;
+     }
+     file.close();
+     // resize the embs array to the actual number of queries collected
+     if (num_query_collected < num_queries * batch_size) {
+          std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(EMBEDDING_DIM * num_query_collected);
+          std::memcpy(new_embs.get(), embs.get(), EMBEDDING_DIM * num_query_collected * sizeof(float));
+          embs = std::move(new_embs);
+     }
+     query_embs = std::move(embs);
+     return num_query_collected;
 }
 
 
@@ -91,6 +117,7 @@ bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<s
      return true;
 }
 
+
 bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, std::string& query_directory, int query_interval) {
      int my_id = capi.get_my_id();
      // 1.1. Prepare for the notification by creating object pool for results to store
@@ -105,9 +132,6 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      std::atomic<int> num_queries_to_send(num_queries);
      bool ret = capi.register_notification_handler(
                [&](const Blob& result){
-                    // std::cout << "Subgroup Notification received:"
-                    //       << "data:" << std::string(reinterpret_cast<const char*>(result.bytes),result.size)
-                    //       << std::endl;
                     std::string query_text;
                     std::vector<std::string> top_k_docs;
                     if (!deserialize_result(result, query_text, top_k_docs)) {
@@ -157,31 +181,51 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
                reply_future.second.get(); // wait for the object has been put
           }
      }
+     std::cout << "Registered server-side notifications."<< std::endl;
 
 
-     // 2. Prepare the query
-     std::vector<std::string> queries = read_queries(query_directory);
-     size_t tatal_q_num = queries.size();
+     // 2. Prepare the query and query embeddings
+     std::filesystem::path query_pathname = std::filesystem::path(query_directory) / QUERY_FILENAME;
+     std::vector<std::string> queries;
+     int num_query_collected = read_queries(query_pathname, num_queries, batch_size, queries);
      if (queries.size() == 0) {
           std::cerr << "Error: failed to read queries from " << query_directory << std::endl;
           return false;
      }
+     std::cout << "Read " << num_query_collected << " queries from " << query_pathname << std::endl;
+
+     std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
+     std::unique_ptr<float[]> query_embs;
+     int num_emb_collected = read_query_embs(query_emb_pathname, num_queries, batch_size, query_embs);
+     if (num_query_collected != num_emb_collected){
+          std::cerr << "Error: num_query and num_query_emb don't match from directory" << std::endl;
+          return false;
+     }
+     std::cout << "Read " << num_emb_collected << " query embeddings from " << query_emb_pathname << std::endl;
+     
+
 
      // 3. send the queries to the cascade
      for (int qb_id = 0; qb_id < num_queries; qb_id++) {
           std::string key = "/rag/emb/centroids_search/client" + std::to_string(my_id) + "/qb" + std::to_string(qb_id);
+          /*** TODO: current method of prepare query text and emb cause extra copies that could be avoided. ***/
           // 3.1. Prepare the query texts
           std::vector<std::string> cur_query_list;
           for (int j = 0; j < batch_size; ++j) {
-              cur_query_list.push_back(queries[(qb_id + j) % tatal_q_num]);
-              if (sent_queries.find(queries[(qb_id + j) % tatal_q_num]) == sent_queries.end()) {
-                   sent_queries[queries[(qb_id + j) % tatal_q_num]] = std::vector<std::tuple<int, int>>();
+              cur_query_list.push_back(queries[(qb_id + j) % num_query_collected]);
+              if (sent_queries.find(queries[(qb_id + j) % num_query_collected]) == sent_queries.end()) {
+                   sent_queries[queries[(qb_id + j) % num_query_collected]] = std::vector<std::tuple<int, int>>();
               }
-              sent_queries[queries[(qb_id + j) % tatal_q_num]].push_back(std::make_tuple(qb_id, j));
+              sent_queries[queries[(qb_id + j) % num_query_collected]].push_back(std::make_tuple(qb_id, j));
           }
-          // 3.2. Generate embedding for the query
-          std::unique_ptr<float[]> query_embeddings;
-          generate_embeddings(EMBEDDING_DIM, batch_size, query_embeddings);
+          // 3.2. Prepare query embeddings
+          std::unique_ptr<float[]> query_embeddings(new float[EMBEDDING_DIM * batch_size]);
+          for (int j = 0; j < batch_size; ++j) {
+               int pos = (qb_id * batch_size + j) % num_emb_collected;
+               for (int k = 0; k < EMBEDDING_DIM; ++k) {
+                    query_embeddings[j * EMBEDDING_DIM + k] = query_embs[pos * EMBEDDING_DIM + k];
+               }
+          }
           // 3.3. format the query 
           std::string emb_query_string = format_query_emb_object(batch_size, query_embeddings, cur_query_list);
           ObjectWithStringKey emb_query_obj;
@@ -216,7 +260,7 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      // running = false;
      // message_thread.join();
      while (running.load()) {
-          // std::this_thread::sleep_for(std::chrono::seconds(1));
+          std::this_thread::sleep_for(std::chrono::microseconds(query_interval/100));
      }
 
      // 4. flush logs
@@ -237,6 +281,7 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
 }
 
 
+/*** TODO: handle the segmentation fault if call multiple times this, while servers not stoped and refreshed ***/
 int main(int argc, char** argv){
      int opt;
      int num_queries = 0;
@@ -275,7 +320,6 @@ int main(int argc, char** argv){
      std::cout << "Number of queries: " << num_queries << std::endl;
      std::cout << "Batch size: " << batch_size << std::endl;
 
-     rng.seed(42);
      auto& capi = ServiceClientAPI::get_service_client();
      run_latency_test(capi, num_queries, batch_size, query_directory, query_interval);
 
