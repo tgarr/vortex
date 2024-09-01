@@ -192,7 +192,6 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           std::cerr << "Error: failed to read queries from " << query_directory << std::endl;
           return false;
      }
-     std::cout << "Read " << num_query_collected << " queries from " << query_pathname << std::endl;
 
      std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
      std::unique_ptr<float[]> query_embs;
@@ -201,7 +200,6 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           std::cerr << "Error: num_query and num_query_emb don't match from directory" << std::endl;
           return false;
      }
-     std::cout << "Read " << num_emb_collected << " query embeddings from " << query_emb_pathname << std::endl;
      
 
 
@@ -305,7 +303,7 @@ int main(int argc, char** argv){
                     query_interval = std::atoi(optarg);
                     break;
                case '?': // Unknown option or missing option argument
-                    std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_dir.csv> -i <interval>" << std::endl;
+                    std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_data_dir> -i <interval>" << std::endl;
                     return 1;
                default:
                     break;
@@ -313,7 +311,7 @@ int main(int argc, char** argv){
      }
      if (num_queries == 0 || batch_size == 0 || query_directory.empty()) {
           std::cerr << "Error: Missing required options." << std::endl;
-          std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_dir.csv>" << std::endl;
+          std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_dir.csv> -i <interval>" << std::endl;
           return 1;
      }
 

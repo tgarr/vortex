@@ -58,7 +58,7 @@ Note that because we use these keys as identifier to the embeddings object, if a
 
 - documents: stored in cascade as KV objects under /rag/doc object pool in PCSS. Document objects' keys are in the format of [doc_path] = /rag/doc/[doc_identifier]
 
-- embeddings to document path table. To fetch the document on a given embedding from its cluster_id and embedding_id. We keep a table for each cluster. The table matches the embeddings of that cluster to their corresponding pathnames. Using this table, the stored documents could be retrieved as context for the LLM. The tables are stored in Cascade in K/V format, with key as /rag/doc/emb_doc_map/cluster[cluster_id], value is in json with emb_id, document_pathname.
+- embeddings to document path table. To fetch the document on a given embedding from its cluster_id and embedding_id. We keep a table for each cluster. The table matches the embeddings of that cluster to their corresponding pathnames. Using this table, the stored documents could be retrieved as context for the LLM. The tables are stored in Cascade in K/V format, with key as /rag/doc/emb_doc_map/cluster[cluster_id]/[table_id], value is in json with emb_id, document_pathname. There could be more than one table object per cluster, depends on the size of the cluster.
 
 Step1 and step2 could be done by running ``` python setup.py ``` at client node, n4.
 
