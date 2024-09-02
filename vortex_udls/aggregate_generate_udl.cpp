@@ -90,25 +90,39 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_START, my_id, 0, cluster_id);
 #endif
-        std::string table_key = "/rag/doc/emb_doc_map/cluster" + std::to_string(cluster_id);
-        auto get_query_results = typed_ctxt->get_service_client_ref().get(table_key);
-        auto& reply = get_query_results.get().begin()->second.get();
-        if (reply.blob.size == 0) {
-            std::cerr << "Error: failed to get the doc table for cluster_id=" << cluster_id << std::endl;
-            dbg_default_error("Failed to get the doc table for cluster_id={}.", cluster_id);
-            return false;
+        // 0. check the keys for this grouped embedding objects stored in cascade
+        //    because of the message size, the map for one cluster may split into multiple chunks stored in Cascade
+        bool stable = 1; 
+        persistent::version_t version = CURRENT_VERSION;
+        std::string table_prefix = "/rag/doc/emb_doc_map/cluster" + std::to_string(cluster_id);
+        auto keys_future = typed_ctxt->get_service_client_ref().list_keys(version, stable, table_prefix);
+        std::vector<std::string> map_obj_keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
+        if (map_obj_keys.empty()) {
+            std::cerr << "Error: " << table_prefix <<" has no emb_doc_map object found in the KV store" << std::endl;
+            dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, table_prefix);
+            return -1;
         }
-        char* json_data = const_cast<char*>(reinterpret_cast<const char*>(reply.blob.bytes));
-        std::string json_str(json_data, reply.blob.size);
-        try{
-            nlohmann::json doc_table_json = nlohmann::json::parse(json_str);
-            for (const auto& [emb_index, pathname] : doc_table_json.items()) {
-                this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
+        // 1. get the doc table for the cluster_id
+        for (const auto& map_obj_key : map_obj_keys) {
+            auto get_query_results = typed_ctxt->get_service_client_ref().get(map_obj_key);
+            auto& reply = get_query_results.get().begin()->second.get();
+            if (reply.blob.size == 0) {
+                std::cerr << "Error: failed to get the doc table for key=" << map_obj_key << std::endl;
+                dbg_default_error("Failed to get the doc table for key={}.", map_obj_key);
+                return false;
             }
-        } catch (const nlohmann::json::parse_error& e) {
-            std::cerr << "Error: load_doc_table JSON parse error: " << e.what() << std::endl;
-            dbg_default_error("{}, JSON parse error: {}", __func__, e.what());
-            return false;
+            char* json_data = const_cast<char*>(reinterpret_cast<const char*>(reply.blob.bytes));
+            std::string json_str(json_data, reply.blob.size);
+            try{
+                nlohmann::json doc_table_json = nlohmann::json::parse(json_str);
+                for (const auto& [emb_index, pathname] : doc_table_json.items()) {
+                    this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
+                }
+            } catch (const nlohmann::json::parse_error& e) {
+                std::cerr << "Error: load_doc_table JSON parse error: " << e.what() << std::endl;
+                dbg_default_error("{}, JSON parse error: {}", __func__, e.what());
+                return false;
+            }
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING     
         TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_END, my_id, 0, cluster_id);

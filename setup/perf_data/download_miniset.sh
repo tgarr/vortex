@@ -1,5 +1,5 @@
 #!/usr/bin/bash
 
-wget https://cornell.box.com/shared/static/9ws05j69nmokwtt77jfjqt5kl2i3pi7r.zip ./
-unzip ./9ws05j69nmokwtt77jfjqt5kl2i3pi7r.zip
-rm ./9ws05j69nmokwtt77jfjqt5kl2i3pi7r.zip
+wget -O miniset.zip https://cornell.box.com/shared/static/bibc6qz9p9abgkqmc4y2aryz64bm3idz.zip ./
+unzip ./miniset.zip
+rm ./miniset.zip

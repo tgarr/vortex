@@ -11,6 +11,8 @@ from derecho.cascade.external_client import ServiceClientAPI
 
 NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
 EMBEDDING_DIM = 1024
+NUM_KEY_PER_MAP_OBJ = 50000 # takes around 1MB memory
+FLOAT_POINT_SIZE = 32  # currently only support 32-bit float TODO: add support for 64-bit float
 
 np.random.seed(1234)             # make reproducible
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -69,8 +71,14 @@ def get_embeddings(basepath, filename, d=1024):
     Load the embeddings from a pickle file.
     '''
     fpath = os.path.join(basepath, filename)
+    print(f"Loading embeddings from {fpath}")
     with open(fpath, 'rb') as file:
         data = pickle.load(file)
+    if isinstance(data, list):
+        data = np.array(data)
+    if data.dtype == np.float64 and FLOAT_POINT_SIZE == 32:
+        float32_data = data.astype(np.float32)
+        data = float32_data
     assert(data.shape[1] == d)
     return data
 
@@ -93,14 +101,18 @@ def put_initial_embeddings_docs(capi, basepath):
     DOC_EMB_MAP = pickle.load(open(os.path.join(basepath, DOC_EMB_MAP_FILENAME), "rb"))
     print("Initialized: putting doc_emb map to cascade server ...")
     for i, (cluster_id, table_dict) in enumerate(DOC_EMB_MAP.items()):
-        key = f"/rag/doc/emb_doc_map/cluster{cluster_id}"
-        table_json = json.dumps(table_dict)
-        res = capi.put(key, table_json.encode('utf-8'))
-        if res:
-            res.get_result()
-        else:
-            print(f"Failed to put the doc table to key: {key}")
-            exit(1)
+        # break the table into chunks
+        chunk_idx = break_into_chunks(len(table_dict), NUM_KEY_PER_MAP_OBJ)
+        for j, (start_idx, end_idx) in enumerate(chunk_idx):
+            key = f"/rag/doc/emb_doc_map/cluster{cluster_id}/{j}"
+            table_dict_chunk = {k: table_dict[k] for k in list(table_dict.keys())[start_idx:end_idx]}
+            table_json = json.dumps(table_dict_chunk)
+            res = capi.put(key, table_json.encode('utf-8'))
+            if res:
+                res.get_result()
+            else:
+                print(f"Failed to put the doc table to key: {key}")
+                exit(1)
     print(f"Initialized doc_emb map")
     print("Initialized: putting centroids and clusters' embeddings to cascade server ...")
     # 1. Put centroids'embeddings to cascade.
