@@ -71,7 +71,6 @@ def get_embeddings(basepath, filename, d=1024):
     Load the embeddings from a pickle file.
     '''
     fpath = os.path.join(basepath, filename)
-    print(f"Loading embeddings from {fpath}")
     with open(fpath, 'rb') as file:
         data = pickle.load(file)
     if isinstance(data, list):
