@@ -49,11 +49,11 @@ struct ClusterSearchResults{
         return collected_all_results;
     }
 
-    void add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results){
+    bool add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results){
         if(std::find(collected_cluster_ids.begin(), collected_cluster_ids.end(), cluster_id) != collected_cluster_ids.end()){
             std::cerr << "ERROR: cluster id=" << cluster_id << " search result is already collected for query=" << this->query_text << std::endl;
             dbg_default_error("{} received same cluster={} result for query={}.", __func__, cluster_id, this->query_text);
-            return;
+            return false;
         }
         this->collected_cluster_ids.push_back(cluster_id);
         // Add the cluster_results to the min_heap, and keep the size of the heap to be top_k
@@ -65,6 +65,7 @@ struct ClusterSearchResults{
                 agg_top_k_results.push(doc_index);
             }
         }
+        return true;
     }
 };
 
@@ -77,7 +78,11 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
     std::unordered_map<int, std::unordered_map<long, std::string>> doc_tables; // cluster_id -> emb_index -> pathname
     /*** TODO: use a more efficient way to store the doc_contents cache */
     std::unordered_map<int,std::unordered_map<long, std::string>> doc_contents; // {cluster_id0:{ emb_index0: doc content0, ...}, cluster_id1:{...}, ...}
-    std::unordered_map<std::string, std::unique_ptr<ClusterSearchResults>> query_results; // query_text -> ClusterSearchResults
+    /*** query_result: query_text -> ClusterSearchResults 
+     *   is a UDL local cache to store the cluster search results for queries that haven't notified the client 
+     *   (due to not all cluster results are collected)
+    */
+    std::unordered_map<std::string, std::unique_ptr<ClusterSearchResults>> query_results; // 
 
 
     int my_id; // the node id of this node; logging purpose
@@ -206,7 +211,12 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         if (query_results.find(query_text) == query_results.end()) {
             query_results[query_text] = std::make_unique<ClusterSearchResults>(query_text, top_num_centroids, top_k);
         }
-        query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
+        bool added_cluster_result = query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
+        if (!added_cluster_result) {
+            std::cerr << "Error: failed to add the cluster search result for query=" << query_text << " and cluster_id=" << cluster_id << std::endl;
+            dbg_default_error("Failed to add the cluster search result for query={} and cluster_id={}.", query_text, cluster_id);
+            return;
+        }
         if (!query_results[query_text]->is_all_results_collected()) {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, query_batch_id, cluster_id);
@@ -226,8 +236,8 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             std::string res_doc;
             bool find_doc = get_doc(typed_ctxt,doc_index.cluster_id, doc_index.emb_id, res_doc);
             if (!find_doc) {
-                std::cerr << "Error: failed to get_doc for cluster_id=" << cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
-                dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", cluster_id, doc_index.emb_id);
+                std::cerr << "Error: failed to get_doc for cluster_id=" << doc_index.cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
+                dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", doc_index.cluster_id, doc_index.emb_id);
                 return;
             }
             top_k_docs.push_back(res_doc);
@@ -257,8 +267,11 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
 #endif
+            // 7. (garbage collection) remove query and query_result from the cache
+            query_results.erase(query_text);
         } catch (derecho::derecho_exception& ex) {
-            std::cout << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
+            std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
+            dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());
         }
 //         try{
 // #ifdef ENABLE_VORTEX_EVALUATION_LOGGING

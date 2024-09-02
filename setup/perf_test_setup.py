@@ -11,7 +11,7 @@ from derecho.cascade.external_client import ServiceClientAPI
 
 NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
 EMBEDDING_DIM = 1024
-NUM_KEY_PER_MAP_OBJ = 50000 # takes around 1MB memory
+NUM_KEY_PER_MAP_OBJ = 100# 50000 # takes around 1MB memory
 FLOAT_POINT_SIZE = 32  # currently only support 32-bit float TODO: add support for 64-bit float
 
 np.random.seed(1234)             # make reproducible
@@ -71,7 +71,6 @@ def get_embeddings(basepath, filename, d=1024):
     Load the embeddings from a pickle file.
     '''
     fpath = os.path.join(basepath, filename)
-    print(f"Loading embeddings from {fpath}")
     with open(fpath, 'rb') as file:
         data = pickle.load(file)
     if isinstance(data, list):
@@ -88,9 +87,8 @@ def break_into_chunks(num_embeddings, chunk_size):
     num_chunks = num_embeddings // chunk_size + 1 if num_embeddings % chunk_size != 0 else num_embeddings // chunk_size
     remaining_embs_num = num_embeddings
     for i in range(num_chunks):
-        chunk_size = min(chunk_size, remaining_embs_num)
         start_idx = i*chunk_size
-        end_idx = i*chunk_size + chunk_size
+        end_idx = i*chunk_size + min(chunk_size, remaining_embs_num)
         chunk_idxs.append((start_idx, end_idx))
         remaining_embs_num -= chunk_size
     return chunk_idxs
@@ -99,13 +97,14 @@ def break_into_chunks(num_embeddings, chunk_size):
 def put_initial_embeddings_docs(capi, basepath):
     # 0. put answer mapping
     DOC_EMB_MAP = pickle.load(open(os.path.join(basepath, DOC_EMB_MAP_FILENAME), "rb"))
-    print("Initialized: putting doc_emb map to cascade server ...")
+    print("Initializing: putting doc_emb map to cascade server ...")
     for i, (cluster_id, table_dict) in enumerate(DOC_EMB_MAP.items()):
         # break the table into chunks
         chunk_idx = break_into_chunks(len(table_dict), NUM_KEY_PER_MAP_OBJ)
+        table_key_list = list(table_dict.keys())
         for j, (start_idx, end_idx) in enumerate(chunk_idx):
             key = f"/rag/doc/emb_doc_map/cluster{cluster_id}/{j}"
-            table_dict_chunk = {k: table_dict[k] for k in list(table_dict.keys())[start_idx:end_idx]}
+            table_dict_chunk = {k: table_dict[k] for k in table_key_list[start_idx:end_idx]}
             table_json = json.dumps(table_dict_chunk)
             res = capi.put(key, table_json.encode('utf-8'))
             if res:
@@ -113,23 +112,20 @@ def put_initial_embeddings_docs(capi, basepath):
             else:
                 print(f"Failed to put the doc table to key: {key}")
                 exit(1)
-    print(f"Initialized doc_emb map")
-    print("Initialized: putting centroids and clusters' embeddings to cascade server ...")
     # 1. Put centroids'embeddings to cascade.
     centroids_embs = get_embeddings(basepath, CENTROIDS_FILENAME, EMBEDDING_DIM)
     centroids_chunk_idx = break_into_chunks(centroids_embs.shape[0], NUM_EMB_PER_OBJ)
-    print(f"number of centroids from pickle is {centroids_embs.shape[0]}")
+    print(f"Initilizing: put {centroids_embs.shape[0]} centroids embeddings to cascade")
     for i, (start_idx, end_idx) in enumerate(centroids_chunk_idx):
         key = f"/rag/emb/centroids_obj/{i}"
         centroids_embs_chunk = centroids_embs[start_idx:end_idx]
         res = capi.put(key, centroids_embs_chunk.tobytes())
         if res:
             res.get_result()
-            print(f"Put the centroids embeddings to key: {key}, shape: {centroids_embs_chunk.shape}")
         else:
             print(f"Failed to put the centroids embeddings to key: {key}")
             exit(1)
-
+    print("Initializing: putting clusters' embeddings and docs to cascade server ...")
     doc_list = pickle.load(open(os.path.join(basepath, DOC_LIST_FILENAME), "rb"))
     # 2. Put clusters' embeddings and docs to cascade.
     centroid_count = centroids_embs.shape[0]
@@ -144,7 +140,6 @@ def put_initial_embeddings_docs(capi, basepath):
             res = capi.put(key, cluster_embs_chunk.tobytes())
             if res:
                 res.get_result()
-                print(f"Put the cluster embeddings to key: {key}, shape: {cluster_embs_chunk.shape}")
             else:
                 print(f"Failed to put the cluster embeddings to key: {key}")
                 exit(1)
@@ -159,7 +154,7 @@ def put_initial_embeddings_docs(capi, basepath):
             else:
                 print(f"Failed to put the doc to key: {doc_key}")
                 exit(1)
-        print(f"Put cluster{cluster_id} docs to cascade")
+        print(f"         Put cluster{cluster_id} docs to cascade")
     print(f"Initialized embeddings")
 
 
