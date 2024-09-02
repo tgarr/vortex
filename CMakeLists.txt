@@ -197,12 +197,6 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/udl_dlls.cfg
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/setup
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n1/setup
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/run.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
@@ -219,6 +213,14 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/clear_log.sh
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/setup
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/latency_client
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/latency_client
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cfg/run.sh.tmp
