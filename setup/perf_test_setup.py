@@ -125,7 +125,6 @@ def put_initial_embeddings_docs(capi, basepath):
         res = capi.put(key, centroids_embs_chunk.tobytes())
         if res:
             res.get_result()
-            print(f"Put the centroids embeddings to key: {key}, shape: {centroids_embs_chunk.shape}")
         else:
             print(f"Failed to put the centroids embeddings to key: {key}")
             exit(1)
@@ -144,7 +143,6 @@ def put_initial_embeddings_docs(capi, basepath):
             res = capi.put(key, cluster_embs_chunk.tobytes())
             if res:
                 res.get_result()
-                print(f"Put the cluster embeddings to key: {key}, shape: {cluster_embs_chunk.shape}")
             else:
                 print(f"Failed to put the cluster embeddings to key: {key}")
                 exit(1)
