@@ -109,8 +109,8 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         }
         bool filtered = filter_exact_matched_keys(map_obj_keys, table_prefix);
         if (!filtered) {
-               std::cerr << "Error: [AGGUDL] prefix [" << embs_prefix <<"] has keys with invalid format" << std::endl;
-               dbg_default_error("[{}]at {}, prefix [{}] has keys with invalid format.", gettid(), __func__, embs_prefix);
+               std::cerr << "Error: [AGGUDL] prefix [" << table_prefix <<"] has keys with invalid format" << std::endl;
+               dbg_default_error("[{}]at {}, prefix [{}] has keys with invalid format.", gettid(), __func__, table_prefix);
                return -1;
           }
         // 1. get the doc table for the cluster_id
