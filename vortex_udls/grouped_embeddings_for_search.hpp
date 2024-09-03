@@ -17,6 +17,8 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/gpu/StandardGpuResources.h>
 
+#include "rag_utils.hpp"
+
 namespace derecho{
 namespace cascade{
 
@@ -127,6 +129,7 @@ public:
                dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, embs_prefix);
                return -1;
           }
+          filter_exact_matched_keys(emb_obj_keys, embs_prefix);
 
           // 1. Get the cluster embeddings from KV store in Cascade
           float* data;

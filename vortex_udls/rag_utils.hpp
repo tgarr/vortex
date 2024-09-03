@@ -1,3 +1,4 @@
+#pragma once
 /***
 * Helper function for logging purpose, to extract the query information from the key
 * @param key_string the key string to extract the query information from
@@ -70,6 +71,23 @@ bool parse_query_info(const std::string& key_string, int& client_id, int& batch_
      return true;
 }
 
+/*** Helper function to callers of list_key:
+*    filter keys that doesn't have exact prefix, 
+*    e.g. /doc1/1, /doc12/1, which return by list_keys("/doc1"), but are not for the same cluster
+*    TODO: adjust op_list_keys semantics? 
+*/
+void filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix){
+     for (auto& key : obj_keys) {
+          size_t pos = key.rfind("/");
+          if (pos == std::string::npos) {
+               std::cerr << "Error: invalid obj_key format" << std::endl; // shouldn't happen
+          }
+          if (key.substr(0, pos) != prefix) {
+               obj_keys.erase(std::remove(obj_keys.begin(), obj_keys.end(), key), obj_keys.end());
+          }
+     }
+}
+
 /*** 
 * Helper function to cdpo_handler()
 * @param bytes the bytes object to deserialize
@@ -122,6 +140,24 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
      } catch (const nlohmann::json::parse_error& e) {
           std::cerr << "JSON parse error: " << e.what() << std::endl;
      }
+}
+
+/***
+* Format the search results for each query to send to the next UDL.
+* The format is | top_k | embeding_id_vector | distance_vector | query_text |
+***/
+std::string serialize_cluster_search_result(uint32_t top_k, long* I, float* D, int idx, std::string& query_text){
+     std::string query_search_result;
+     std::string num_embs(4, '\0');  // denotes the number of embedding_ids and distances 
+     num_embs[0] = (top_k >> 24) & 0xFF;
+     num_embs[1] = (top_k >> 16) & 0xFF;
+     num_embs[2] = (top_k >> 8) & 0xFF;
+     num_embs[3] = top_k & 0xFF;
+     query_search_result = num_embs +\
+                         std::string(reinterpret_cast<const char*>(&I[idx * top_k]) , sizeof(long) * top_k) +\
+                         std::string(reinterpret_cast<const char*>(&D[idx * top_k]) , sizeof(float) * top_k) +\
+                         query_text;
+     return query_search_result; // RVO
 }
 
 

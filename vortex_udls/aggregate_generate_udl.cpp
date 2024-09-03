@@ -107,6 +107,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, table_prefix);
             return -1;
         }
+        filter_exact_matched_keys(map_obj_keys, table_prefix);
         // 1. get the doc table for the cluster_id
         for (const auto& map_obj_key : map_obj_keys) {
             auto get_query_results = typed_ctxt->get_service_client_ref().get(map_obj_key);
