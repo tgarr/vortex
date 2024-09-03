@@ -107,14 +107,9 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, table_prefix);
             return -1;
         }
-        bool filtered = filter_exact_matched_keys(map_obj_keys, table_prefix);
-        if (!filtered) {
-               std::cerr << "Error: [AGGUDL] prefix [" << table_prefix <<"] has keys with invalid format" << std::endl;
-               dbg_default_error("[{}]at {}, prefix [{}] has keys with invalid format.", gettid(), __func__, table_prefix);
-               return -1;
-          }
+        std::vector<std::string> filtered_keys = filter_exact_matched_keys(map_obj_keys, table_prefix);
         // 1. get the doc table for the cluster_id
-        for (const auto& map_obj_key : map_obj_keys) {
+        for (const auto& map_obj_key : filtered_keys) {
             auto get_query_results = typed_ctxt->get_service_client_ref().get(map_obj_key);
             auto& reply = get_query_results.get().begin()->second.get();
             if (reply.blob.size == 0) {

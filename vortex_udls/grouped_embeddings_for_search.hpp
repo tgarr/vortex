@@ -123,18 +123,13 @@ public:
           // 0. check the keys for this grouped embedding objects stored in cascade
           //    because of the message size, one cluster might need multiple objects to store its embeddings
           auto keys_future = typed_ctxt->get_service_client_ref().list_keys(version, stable, embs_prefix);
-          std::vector<std::string> emb_obj_keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
-          if (emb_obj_keys.empty()) {
+          std::vector<std::string> listed_emb_obj_keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
+          if (listed_emb_obj_keys.empty()) {
                std::cerr << "Error: prefix [" << embs_prefix <<"] has no embedding object found in the KV store" << std::endl;
                dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, embs_prefix);
                return -1;
           }
-          bool filtered = filter_exact_matched_keys(emb_obj_keys, embs_prefix);
-          if (!filtered) {
-               std::cerr << "Error: prefix [" << embs_prefix <<"] has keys with invalid format" << std::endl;
-               dbg_default_error("[{}]at {}, prefix [{}] has keys with invalid format.", gettid(), __func__, embs_prefix);
-               return -1;
-          }
+          std::vector<std::string> emb_obj_keys = filter_exact_matched_keys(listed_emb_obj_keys, embs_prefix);
 
           // 1. Get the cluster embeddings from KV store in Cascade
           float* data;
