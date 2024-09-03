@@ -80,7 +80,7 @@ void filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::st
      for (auto& key : obj_keys) {
           size_t pos = key.rfind("/");
           if (pos == std::string::npos) {
-               std::cerr << "Error: invalid obj_key format" << std::endl; // shouldn't happen
+               std::cerr << "Error: invalid obj_key format: key" << key << std::endl; // shouldn't happen
           }
           if (key.substr(0, pos) != prefix) {
                obj_keys.erase(std::remove(obj_keys.begin(), obj_keys.end(), key), obj_keys.end());
