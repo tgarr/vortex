@@ -129,7 +129,12 @@ public:
                dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, embs_prefix);
                return -1;
           }
-          filter_exact_matched_keys(emb_obj_keys, embs_prefix);
+          bool filtered = filter_exact_matched_keys(emb_obj_keys, embs_prefix);
+          if (!filtered) {
+               std::cerr << "Error: prefix [" << embs_prefix <<"] has keys with invalid format" << std::endl;
+               dbg_default_error("[{}]at {}, prefix [{}] has keys with invalid format.", gettid(), __func__, embs_prefix);
+               return -1;
+          }
 
           // 1. Get the cluster embeddings from KV store in Cascade
           float* data;

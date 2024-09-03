@@ -76,16 +76,18 @@ bool parse_query_info(const std::string& key_string, int& client_id, int& batch_
 *    e.g. /doc1/1, /doc12/1, which return by list_keys("/doc1"), but are not for the same cluster
 *    TODO: adjust op_list_keys semantics? 
 */
-void filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix){
+bool filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix){
      for (auto& key : obj_keys) {
           size_t pos = key.rfind("/");
           if (pos == std::string::npos) {
-               std::cerr << "Error: invalid obj_key format: key" << key << std::endl; // shouldn't happen
+               std::cerr << "Error: invalid obj_key format, key=" << key << std::endl; // shouldn't happen
+               return false;
           }
           if (key.substr(0, pos) != prefix) {
                obj_keys.erase(std::remove(obj_keys.begin(), obj_keys.end(), key), obj_keys.end());
           }
      }
+     return true;
 }
 
 /*** 
