@@ -1,3 +1,8 @@
+#pragma once
+#include <queue>
+#include <vector>
+
+
 /***
 * Helper function for logging purpose, to extract the query information from the key
 * @param key_string the key string to extract the query information from
@@ -70,6 +75,41 @@ bool parse_query_info(const std::string& key_string, int& client_id, int& batch_
      return true;
 }
 
+struct CompareObjKey {
+     bool operator()(const std::string& key1, const std::string& key2) const {
+          size_t pos = key1.rfind("/");
+          int num1 = std::stoi(key1.substr(pos + 1));
+          pos = key2.rfind("/");
+          int num2 = std::stoi(key2.substr(pos + 1));
+          return num1 > num2;
+     }
+};
+
+/*** Helper function to callers of list_key:
+*    filter keys that doesn't have exact prefix, or duplicate keys (from experiment at scale, it occurs.)
+*    e.g. /doc1/1, /doc12/1, which return by list_keys("/doc1"), but are not for the same cluster
+*    TODO: adjust op_list_keys semantics? 
+*/
+std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix){
+     std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filtered_keys;
+     std::unordered_set<std::string> key_set; /*** TODO: only for correctness test*/
+     for (auto& key : obj_keys) {
+          size_t pos = key.rfind("/");
+          if (pos == std::string::npos) {
+               std::cerr << "Error: invalid obj_key format, key=" << key << "prefix" << prefix  << std::endl; // shouldn't happen
+               continue;
+          }
+          if (key.substr(0, pos) == prefix && key_set.find(key) == key_set.end()) {
+               filtered_keys.push(key);
+               key_set.insert(key);
+          }
+     }
+     if (key_set.size() != filtered_keys.size()) {
+          std::cerr << "Error: filter_exact_matched_keys: key_set.size()=" << key_set.size() << ",filtered_keys.size()=" << filtered_keys.size() << std::endl;
+     }
+     return filtered_keys;
+}
+
 /*** 
 * Helper function to cdpo_handler()
 * @param bytes the bytes object to deserialize
@@ -122,6 +162,24 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
      } catch (const nlohmann::json::parse_error& e) {
           std::cerr << "JSON parse error: " << e.what() << std::endl;
      }
+}
+
+/***
+* Format the search results for each query to send to the next UDL.
+* The format is | top_k | embeding_id_vector | distance_vector | query_text |
+***/
+std::string serialize_cluster_search_result(uint32_t top_k, long* I, float* D, int idx, std::string& query_text){
+     std::string query_search_result;
+     std::string num_embs(4, '\0');  // denotes the number of embedding_ids and distances 
+     num_embs[0] = (top_k >> 24) & 0xFF;
+     num_embs[1] = (top_k >> 16) & 0xFF;
+     num_embs[2] = (top_k >> 8) & 0xFF;
+     num_embs[3] = top_k & 0xFF;
+     query_search_result = num_embs +\
+                         std::string(reinterpret_cast<const char*>(&I[idx * top_k]) , sizeof(long) * top_k) +\
+                         std::string(reinterpret_cast<const char*>(&D[idx * top_k]) , sizeof(float) * top_k) +\
+                         query_text;
+     return query_search_result; // RVO
 }
 
 

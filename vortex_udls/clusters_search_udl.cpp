@@ -9,7 +9,6 @@
 #include <derecho/openssl/hash.hpp>
 
 #include "grouped_embeddings_for_search.hpp"
-#include "rag_utils.hpp"
 
 
 namespace derecho{
@@ -39,30 +38,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     int my_id; // the node id of this node; logging purpose
 
-    /***
-     * Get the cluster ID from the object's key_string
-     * This function is called when the object is received from the sender
-     * The cluster ID is used to get the embeddings of the corresponding cluster
-     * @param key_string the key string of the object
-     * @return the cluster ID, -1 if not found
-    ***/
-    inline int get_cluster_id(const std::string& key_string) {
-        size_t pos = key_string.find("cluster");
-        if (pos == std::string::npos) {
-            return -1;
-        }
-        pos += 7; 
-        // Extract the number following "cluster"
-        std::string numberStr;
-        while (pos < key_string.size() && std::isdigit(key_string[pos])) {
-            numberStr += key_string[pos];
-            ++pos;
-        }
-        if (!numberStr.empty()) {
-            return std::stoi(numberStr);
-        }
-        return -1;
-    }
 
     /***
      * Format the new_keys for the search results of the queries
@@ -97,23 +72,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         }
     }
 
-    /***
-     * Format the search results for each query to send to the next UDL.
-     * The format is | top_k | embeding_id_vector | distance_vector | query_text |
-    ***/
-    std::string formate_emit_query_info(long* I, float* D, int idx, std::string& query_text){
-        std::string query_search_result;
-        std::string num_embs(4, '\0');  // denotes the number of embedding_ids and distances 
-        num_embs[0] = (this->top_k >> 24) & 0xFF;
-        num_embs[1] = (this->top_k >> 16) & 0xFF;
-        num_embs[2] = (this->top_k >> 8) & 0xFF;
-        num_embs[3] = this->top_k & 0xFF;
-        query_search_result = num_embs +\
-                            std::string(reinterpret_cast<const char*>(&I[idx * this->top_k]) , sizeof(long) * this->top_k) +\
-                            std::string(reinterpret_cast<const char*>(&D[idx * this->top_k]) , sizeof(float) * this->top_k) +\
-                            query_text;
-        return query_search_result;
-    }
+
 
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
@@ -125,8 +84,10 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         // 0. get the cluster ID
-        int cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
-        if (cluster_id == -1) {
+        int cluster_id;
+        std::string cluster_delimiter = "_cluster";  // move this to rag_utils as macro
+        bool extracted_clusterid = parse_number(key_string, cluster_delimiter, cluster_id); // TODO: get the cluster ID from the object
+        if (!extracted_clusterid) {
             std::cerr << "Error: cluster ID not found in the key_string" << std::endl;
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
             return;
@@ -189,6 +150,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
 #endif
         dbg_default_trace("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
+        
 
         // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search
@@ -201,7 +163,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         int idx = 0;
         for (auto it = query_list.begin(); it != query_list.end(); ++it) {
             // 4.2 format the search result
-            std::string query_emit_content = formate_emit_query_info(I, D, idx, *it);
+            std::string query_emit_content = serialize_cluster_search_result(this->top_k, I, D, idx, *it);
             Blob blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
             // 4.3 emit the result
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING

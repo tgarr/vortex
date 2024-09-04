@@ -185,6 +185,7 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
 
 
      // 2. Prepare the query and query embeddings
+     /** TODO: quite some copies in this process, not on critical path, but could be optimized. */
      std::filesystem::path query_pathname = std::filesystem::path(query_directory) / QUERY_FILENAME;
      std::vector<std::string> queries;
      int num_query_collected = read_queries(query_pathname, num_queries, batch_size, queries);
@@ -196,12 +197,17 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
      std::unique_ptr<float[]> query_embs;
      int num_emb_collected = read_query_embs(query_emb_pathname, num_queries, batch_size, query_embs);
-     if (num_query_collected != num_emb_collected){
-          std::cerr << "Error: num_query and num_query_emb don't match from directory" << std::endl;
-          return false;
+     // resize query or query_embs to make sure they correspond, i.e. have the same number of queries
+     if (num_query_collected > num_emb_collected){ // truncate query_vector to match the number of query embeddings
+          queries.resize(num_query_collected);
+          num_query_collected = num_emb_collected;
+     } else if (num_emb_collected > num_query_collected) { // truncate query_embs to match the number of queries
+          std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(EMBEDDING_DIM * num_query_collected);
+          std::memcpy(new_embs.get(), query_embs.get(), EMBEDDING_DIM * num_emb_collected * sizeof(float));
+          query_embs = std::move(new_embs);
+          num_emb_collected = num_query_collected;
      }
      
-
 
      // 3. send the queries to the cascade
      for (int qb_id = 0; qb_id < num_queries; qb_id++) {

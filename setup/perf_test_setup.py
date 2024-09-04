@@ -11,7 +11,7 @@ from derecho.cascade.external_client import ServiceClientAPI
 
 NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
 EMBEDDING_DIM = 1024
-NUM_KEY_PER_MAP_OBJ = 100# 50000 # takes around 1MB memory
+NUM_KEY_PER_MAP_OBJ = 50000 # takes around 1MB memory
 FLOAT_POINT_SIZE = 32  # currently only support 32-bit float TODO: add support for 64-bit float
 
 np.random.seed(1234)             # make reproducible
@@ -112,6 +112,7 @@ def put_initial_embeddings_docs(capi, basepath):
             else:
                 print(f"Failed to put the doc table to key: {key}")
                 exit(1)
+        print(f"         Put cluster{cluster_id} doc_emb_map size: {len(table_dict)}")
     # 1. Put centroids'embeddings to cascade.
     centroids_embs = get_embeddings(basepath, CENTROIDS_FILENAME, EMBEDDING_DIM)
     centroids_chunk_idx = break_into_chunks(centroids_embs.shape[0], NUM_EMB_PER_OBJ)
@@ -154,7 +155,7 @@ def put_initial_embeddings_docs(capi, basepath):
             else:
                 print(f"Failed to put the doc to key: {doc_key}")
                 exit(1)
-        print(f"         Put cluster{cluster_id} docs to cascade")
+        print(f"         Put cluster{cluster_id}, num {num_embeddings} emb+doc, {len(cluster_chunk_idx)} objs to cascade")
     print(f"Initialized embeddings")
 
 

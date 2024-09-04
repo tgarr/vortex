@@ -17,6 +17,8 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/gpu/StandardGpuResources.h>
 
+#include "rag_utils.hpp"
+
 namespace derecho{
 namespace cascade{
 
@@ -76,7 +78,7 @@ public:
      * This involve copying the data from received blobs.
      ***/
      float* multi_emb_object_retrieve(int& retrieved_num_embs,
-                                        std::vector<std::string>& emb_obj_keys,
+                                        std::priority_queue<std::string, std::vector<std::string>, CompareObjKey>& emb_obj_keys,
                                         DefaultCascadeContextType* typed_ctxt,
                                         persistent::version_t version,
                                         bool stable = 1){
@@ -84,11 +86,15 @@ public:
           size_t num_obj = emb_obj_keys.size();
           size_t data_size = 0;
           Blob blobs[num_obj];
-          for (size_t i = 0; i < num_obj; i++) {
-               auto get_query_results = typed_ctxt->get_service_client_ref().get(emb_obj_keys[i],version, stable);
+          size_t i = 0;
+          while (!emb_obj_keys.empty()){
+               std::string emb_obj_key = emb_obj_keys.top();
+               emb_obj_keys.pop();
+               auto get_query_results = typed_ctxt->get_service_client_ref().get(emb_obj_key,version, stable);
                auto& reply = get_query_results.get().begin()->second.get();
                blobs[i] = std::move(const_cast<Blob&>(reply.blob));
-               data_size += blobs[i].size / sizeof(float);
+               data_size += blobs[i].size / sizeof(float);  
+               i++;
           }
           // 2. copy the embeddings from the blobs to the data
           data = (float*)malloc(data_size * sizeof(float));
@@ -121,18 +127,20 @@ public:
           // 0. check the keys for this grouped embedding objects stored in cascade
           //    because of the message size, one cluster might need multiple objects to store its embeddings
           auto keys_future = typed_ctxt->get_service_client_ref().list_keys(version, stable, embs_prefix);
-          std::vector<std::string> emb_obj_keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
-          if (emb_obj_keys.empty()) {
+          std::vector<std::string> listed_emb_obj_keys = typed_ctxt->get_service_client_ref().wait_list_keys(keys_future);
+          if (listed_emb_obj_keys.empty()) {
                std::cerr << "Error: prefix [" << embs_prefix <<"] has no embedding object found in the KV store" << std::endl;
                dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, embs_prefix);
                return -1;
           }
+          std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> emb_obj_keys = filter_exact_matched_keys(listed_emb_obj_keys, embs_prefix);
 
           // 1. Get the cluster embeddings from KV store in Cascade
           float* data;
           int num_retrieved_embs = 0;
           if (emb_obj_keys.size() == 1) {
-               data = single_emb_object_retrieve(num_retrieved_embs, emb_obj_keys[0], typed_ctxt, version, stable);
+               std::string emb_obj_key = emb_obj_keys.top();
+               data = single_emb_object_retrieve(num_retrieved_embs, emb_obj_key, typed_ctxt, version, stable);
           } else {
                data = multi_emb_object_retrieve(num_retrieved_embs, emb_obj_keys, typed_ctxt, version ,stable);
           }
@@ -142,7 +150,7 @@ public:
                return -1;
           }
           dbg_default_trace("[{}]: embs_prefix={}, num_emb_objects={} retrieved.", __func__, embs_prefix, num_retrieved_embs);
-          
+
           // 2. assign the retrieved embeddings to the object
           this->num_embs = num_retrieved_embs;
           this->embeddings = data;

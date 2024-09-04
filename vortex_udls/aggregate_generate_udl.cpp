@@ -2,7 +2,6 @@
 #include <memory>
 #include <map>
 #include <iostream>
-#include <queue>
 #include <tuple>
 #include <unordered_map>
 
@@ -107,8 +106,11 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, table_prefix);
             return -1;
         }
+        std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filtered_keys = filter_exact_matched_keys(map_obj_keys, table_prefix);
         // 1. get the doc table for the cluster_id
-        for (const auto& map_obj_key : map_obj_keys) {
+        while(!filtered_keys.empty()){
+            std::string map_obj_key = filtered_keys.top();
+            filtered_keys.pop();
             auto get_query_results = typed_ctxt->get_service_client_ref().get(map_obj_key);
             auto& reply = get_query_results.get().begin()->second.get();
             if (reply.blob.size == 0) {
@@ -273,20 +275,6 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
             dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());
         }
-//         try{
-// #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-//             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
-// #endif
-//             typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
-// #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-//             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
-// #endif
-//             dbg_default_trace("[AggregateGenUDL] Put {} to cascade", result_key);
-//         } catch (const std::exception& e) {
-//             std::cerr << "Error: failed to put " << result_key << " to cascade."<< std::endl;
-//             dbg_default_error("Failed to put {} to cascade.", result_key);
-//             return;
-//         }
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
