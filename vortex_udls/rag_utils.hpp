@@ -86,7 +86,7 @@ struct CompareObjKey {
 };
 
 /*** Helper function to callers of list_key:
-*    filter keys that doesn't have exact prefix, 
+*    filter keys that doesn't have exact prefix, or duplicate keys (from experiment at scale, it occurs.)
 *    e.g. /doc1/1, /doc12/1, which return by list_keys("/doc1"), but are not for the same cluster
 *    TODO: adjust op_list_keys semantics? 
 */
@@ -99,7 +99,7 @@ std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filter
                std::cerr << "Error: invalid obj_key format, key=" << key << "prefix" << prefix  << std::endl; // shouldn't happen
                continue;
           }
-          if (key.substr(0, pos) == prefix) {
+          if (key.substr(0, pos) == prefix && key_set.find(key) == key_set.end()) {
                filtered_keys.push(key);
                key_set.insert(key);
           }
