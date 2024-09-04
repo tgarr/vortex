@@ -145,7 +145,8 @@ public:
                return -1;
           }
           dbg_default_trace("[{}]: embs_prefix={}, num_emb_objects={} retrieved.", __func__, embs_prefix, num_retrieved_embs);
-          
+          std::cout << "[GroupedEmbeddingsForSearch] embs_prefix=" << embs_prefix << "num_objs=" << emb_obj_keys.size() << ", num_embs=" << num_embs << " retrieved." << std::endl;          
+
           // 2. assign the retrieved embeddings to the object
           this->num_embs = num_retrieved_embs;
           this->embeddings = data;

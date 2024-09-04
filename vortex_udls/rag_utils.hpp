@@ -1,4 +1,8 @@
 #pragma once
+#include <queue>
+#include <vector>
+
+
 /***
 * Helper function for logging purpose, to extract the query information from the key
 * @param key_string the key string to extract the query information from
@@ -71,13 +75,24 @@ bool parse_query_info(const std::string& key_string, int& client_id, int& batch_
      return true;
 }
 
+struct CompareObjKey {
+     bool operator()(const std::string& key1, const std::string& key2) const {
+          size_t pos = key1.rfind("/");
+          int num1 = std::stoi(key1.substr(pos + 1));
+          pos = key2.rfind("/");
+          int num2 = std::stoi(key2.substr(pos + 1));
+          return num1 > num2;
+     }
+};
+
 /*** Helper function to callers of list_key:
 *    filter keys that doesn't have exact prefix, 
 *    e.g. /doc1/1, /doc12/1, which return by list_keys("/doc1"), but are not for the same cluster
 *    TODO: adjust op_list_keys semantics? 
 */
-std::vector<std::string> filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix){
-     std::vector<std::string> filtered_keys;
+std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix){
+     std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filtered_keys;
+     std::unordered_set<std::string> key_set; /*** TODO: only for correctness test*/
      for (auto& key : obj_keys) {
           size_t pos = key.rfind("/");
           if (pos == std::string::npos) {
@@ -85,9 +100,14 @@ std::vector<std::string> filter_exact_matched_keys(std::vector<std::string>& obj
                continue;
           }
           if (key.substr(0, pos) == prefix) {
-               filtered_keys.push_back(key);
+               filtered_keys.push(key);
+               key_set.insert(key);
           }
      }
+     if (key_set.size() != filtered_keys.size()) {
+          std::cerr << "Error: filter_exact_matched_keys: key_set.size()=" << key_set.size() << ",filtered_keys.size()=" << filtered_keys.size() << std::endl;
+     }
+     std::cout << "prefix: " << prefix << ",filtered_keys.size()=" << filtered_keys.size() << std::endl;
      return filtered_keys;
 }
 

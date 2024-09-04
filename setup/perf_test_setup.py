@@ -155,7 +155,7 @@ def put_initial_embeddings_docs(capi, basepath):
             else:
                 print(f"Failed to put the doc to key: {doc_key}")
                 exit(1)
-        print(f"         Put cluster{cluster_id}, num {num_embeddings} emb+doc to cascade")
+        print(f"         Put cluster{cluster_id}, num {num_embeddings} emb+doc, {len(cluster_chunk_idx)} objs to cascade")
     print(f"Initialized embeddings")
 
 
