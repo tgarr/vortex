@@ -78,7 +78,7 @@ public:
      * This involve copying the data from received blobs.
      ***/
      float* multi_emb_object_retrieve(int& retrieved_num_embs,
-                                        std::vector<std::string>& emb_obj_keys,
+                                        std::priority_queue<std::string, std::vector<std::string>, CompareObjKey>& emb_obj_keys,
                                         DefaultCascadeContextType* typed_ctxt,
                                         persistent::version_t version,
                                         bool stable = 1){
@@ -86,11 +86,15 @@ public:
           size_t num_obj = emb_obj_keys.size();
           size_t data_size = 0;
           Blob blobs[num_obj];
-          for (size_t i = 0; i < num_obj; i++) {
-               auto get_query_results = typed_ctxt->get_service_client_ref().get(emb_obj_keys[i],version, stable);
+          size_t i = 0;
+          while (!emb_obj_keys.empty()){
+               std::string emb_obj_key = emb_obj_keys.top();
+               emb_obj_keys.pop();
+               auto get_query_results = typed_ctxt->get_service_client_ref().get(emb_obj_key,version, stable);
                auto& reply = get_query_results.get().begin()->second.get();
                blobs[i] = std::move(const_cast<Blob&>(reply.blob));
-               data_size += blobs[i].size / sizeof(float);
+               data_size += blobs[i].size / sizeof(float);  
+               i++;
           }
           // 2. copy the embeddings from the blobs to the data
           data = (float*)malloc(data_size * sizeof(float));
@@ -129,13 +133,14 @@ public:
                dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, embs_prefix);
                return -1;
           }
-          std::vector<std::string> emb_obj_keys = filter_exact_matched_keys(listed_emb_obj_keys, embs_prefix);
+          std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> emb_obj_keys = filter_exact_matched_keys(listed_emb_obj_keys, embs_prefix);
 
           // 1. Get the cluster embeddings from KV store in Cascade
           float* data;
           int num_retrieved_embs = 0;
           if (emb_obj_keys.size() == 1) {
-               data = single_emb_object_retrieve(num_retrieved_embs, emb_obj_keys[0], typed_ctxt, version, stable);
+               std::string emb_obj_key = emb_obj_keys.top();
+               data = single_emb_object_retrieve(num_retrieved_embs, emb_obj_key, typed_ctxt, version, stable);
           } else {
                data = multi_emb_object_retrieve(num_retrieved_embs, emb_obj_keys, typed_ctxt, version ,stable);
           }
