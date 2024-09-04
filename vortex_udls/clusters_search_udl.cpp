@@ -38,30 +38,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     int my_id; // the node id of this node; logging purpose
 
-    // /***
-    //  * Get the cluster ID from the object's key_string
-    //  * This function is called when the object is received from the sender
-    //  * The cluster ID is used to get the embeddings of the corresponding cluster
-    //  * @param key_string the key string of the object
-    //  * @return the cluster ID, -1 if not found
-    // ***/
-    // inline int get_cluster_id(const std::string& key_string) {
-    //     size_t pos = key_string.find("cluster");
-    //     if (pos == std::string::npos) {
-    //         return -1;
-    //     }
-    //     pos += 7; 
-    //     // Extract the number following "cluster"
-    //     std::string numberStr;
-    //     while (pos < key_string.size() && std::isdigit(key_string[pos])) {
-    //         numberStr += key_string[pos];
-    //         ++pos;
-    //     }
-    //     if (!numberStr.empty()) {
-    //         return std::stoi(numberStr);
-    //     }
-    //     return -1;
-    // }
 
     /***
      * Format the new_keys for the search results of the queries

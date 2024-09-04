@@ -275,20 +275,6 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
             dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());
         }
-//         try{
-// #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-//             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
-// #endif
-//             typed_ctxt->get_service_client_ref().put_and_forget(result_obj);
-// #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-//             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
-// #endif
-//             dbg_default_trace("[AggregateGenUDL] Put {} to cascade", result_key);
-//         } catch (const std::exception& e) {
-//             std::cerr << "Error: failed to put " << result_key << " to cascade."<< std::endl;
-//             dbg_default_error("Failed to put {} to cascade.", result_key);
-//             return;
-//         }
     }
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
