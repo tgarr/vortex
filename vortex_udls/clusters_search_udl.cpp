@@ -38,30 +38,30 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     int my_id; // the node id of this node; logging purpose
 
-    /***
-     * Get the cluster ID from the object's key_string
-     * This function is called when the object is received from the sender
-     * The cluster ID is used to get the embeddings of the corresponding cluster
-     * @param key_string the key string of the object
-     * @return the cluster ID, -1 if not found
-    ***/
-    inline int get_cluster_id(const std::string& key_string) {
-        size_t pos = key_string.find("cluster");
-        if (pos == std::string::npos) {
-            return -1;
-        }
-        pos += 7; 
-        // Extract the number following "cluster"
-        std::string numberStr;
-        while (pos < key_string.size() && std::isdigit(key_string[pos])) {
-            numberStr += key_string[pos];
-            ++pos;
-        }
-        if (!numberStr.empty()) {
-            return std::stoi(numberStr);
-        }
-        return -1;
-    }
+    // /***
+    //  * Get the cluster ID from the object's key_string
+    //  * This function is called when the object is received from the sender
+    //  * The cluster ID is used to get the embeddings of the corresponding cluster
+    //  * @param key_string the key string of the object
+    //  * @return the cluster ID, -1 if not found
+    // ***/
+    // inline int get_cluster_id(const std::string& key_string) {
+    //     size_t pos = key_string.find("cluster");
+    //     if (pos == std::string::npos) {
+    //         return -1;
+    //     }
+    //     pos += 7; 
+    //     // Extract the number following "cluster"
+    //     std::string numberStr;
+    //     while (pos < key_string.size() && std::isdigit(key_string[pos])) {
+    //         numberStr += key_string[pos];
+    //         ++pos;
+    //     }
+    //     if (!numberStr.empty()) {
+    //         return std::stoi(numberStr);
+    //     }
+    //     return -1;
+    // }
 
     /***
      * Format the new_keys for the search results of the queries
@@ -108,11 +108,16 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         // 0. get the cluster ID
-        int cluster_id = get_cluster_id(key_string); // TODO: get the cluster ID from the object
-        if (cluster_id == -1) {
+        int cluster_id;
+        std::string cluster_delimiter = "_cluster";
+        bool extracted_clusterid = parse_number(key_string, cluster_id); // TODO: get the cluster ID from the object
+        if (!extracted_clusterid) {
             std::cerr << "Error: cluster ID not found in the key_string" << std::endl;
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
             return;
+        }
+        if (cluster_id > 15){
+            std::cout << "Error: [clusterSearchUDL] cluster_id>15, key is" << key_string << std::endl;
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         int client_id = -1;
