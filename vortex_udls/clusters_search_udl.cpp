@@ -109,8 +109,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         // 0. get the cluster ID
         int cluster_id;
-        std::string cluster_delimiter = "_cluster";
-        bool extracted_clusterid = parse_number(key_string, cluster_id); // TODO: get the cluster ID from the object
+        std::string cluster_delimiter = "_cluster";  // move this to rag_utils as macro
+        bool extracted_clusterid = parse_number(key_string, cluster_delimiter, cluster_id); // TODO: get the cluster ID from the object
         if (!extracted_clusterid) {
             std::cerr << "Error: cluster ID not found in the key_string" << std::endl;
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
