@@ -116,9 +116,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
             return;
         }
-        if (cluster_id > 15){
-            std::cout << "Error: [clusterSearchUDL] cluster_id>15, key is" << key_string << std::endl;
-        }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         int client_id = -1;
         int query_batch_id = -1;

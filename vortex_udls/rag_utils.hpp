@@ -107,7 +107,6 @@ std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filter
      if (key_set.size() != filtered_keys.size()) {
           std::cerr << "Error: filter_exact_matched_keys: key_set.size()=" << key_set.size() << ",filtered_keys.size()=" << filtered_keys.size() << std::endl;
      }
-     std::cout << "prefix: " << prefix << ",filtered_keys.size()=" << filtered_keys.size() << std::endl;
      return filtered_keys;
 }
 

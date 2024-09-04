@@ -146,9 +146,6 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                 continue;
             }
             std::string new_key = key_string + "_cluster" + std::to_string(pair.first);
-            if (pair.first > 15){
-                std::cout << "EORROR: Centroid search, new_key: " << new_key << std::endl;
-            }
             std::vector<int> query_ids = pair.second;
 
             // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
