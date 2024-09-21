@@ -239,8 +239,8 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         // 3. All cluster results are collected for this query, aggregate the top_k results
         auto& agg_top_k_results = query_results[query_text]->agg_top_k_results;
         // 4. get the top_k docs content
-        std::vector<std::string> top_k_docs(top_k);
-        uint i = top_k - 1;
+        std::vector<std::string> top_k_docs(agg_top_k_results.size());
+        uint i = agg_top_k_results.size() - 1;
         while (!agg_top_k_results.empty()) {
             auto doc_index = agg_top_k_results.top();
             agg_top_k_results.pop();
