@@ -150,7 +150,6 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
 #endif
         dbg_default_trace("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
-        
 
         // 4. emit the results to the subsequent UDL query-by-query
         // 4.1 construct new keys for all queries in this search

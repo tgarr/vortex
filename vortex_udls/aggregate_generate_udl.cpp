@@ -5,7 +5,6 @@
 #include <tuple>
 #include <unordered_map>
 
-
 #include <cascade/user_defined_logic_interface.hpp>
 #include <cascade/utils.hpp>
 #include <cascade/cascade_interface.hpp>
@@ -17,6 +16,7 @@ namespace cascade{
 
 #define MY_UUID     "11a3c123-3300-31ac-1866-0003ac330000"
 #define MY_DESC     "UDL to aggregate the knn search results for each query from the clusters and run LLM with the query and its top_k closest docs."
+#define SKIP_DOC_RETRIEVAL false
 
 std::string get_uuid() {
     return MY_UUID;
@@ -158,6 +158,13 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_START, this->my_id, emb_index, cluster_id);
 #endif 
         auto& pathname = doc_tables[cluster_id][emb_index];
+
+        if(SKIP_DOC_RETRIEVAL){
+            res_doc = pathname;
+            return true;
+        }
+
+        
         auto get_doc_results = typed_ctxt->get_service_client_ref().get(pathname);
         auto& reply = get_doc_results.get().begin()->second.get();
         if (reply.blob.size == 0) {
@@ -183,7 +190,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
                                const ObjectWithStringKey& object,
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
-                               uint32_t worker_id) override {
+                               uint32_t worker_id) override { 
         // 0. parse the query information from the key_string
         int client_id, cluster_id, batch_id, qid;
         if (!parse_query_info(key_string, client_id, batch_id, cluster_id, qid)) {
@@ -191,6 +198,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("In {}, Failed to parse the query_info from the key_string:{}.", __func__, key_string);
             return;
         }
+        
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         int query_batch_id = batch_id * 100000 + qid % 100000; // cast down qid for logging purpose
         TimestampLogger::log(LOG_TAG_AGG_UDL_START,client_id,query_batch_id,cluster_id);
@@ -231,7 +239,8 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         // 3. All cluster results are collected for this query, aggregate the top_k results
         auto& agg_top_k_results = query_results[query_text]->agg_top_k_results;
         // 4. get the top_k docs content
-        std::vector<std::string> top_k_docs;
+        std::vector<std::string> top_k_docs(top_k);
+        uint i = top_k - 1;
         while (!agg_top_k_results.empty()) {
             auto doc_index = agg_top_k_results.top();
             agg_top_k_results.pop();
@@ -242,7 +251,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
                 dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", doc_index.cluster_id, doc_index.emb_id);
                 return;
             }
-            top_k_docs.push_back(res_doc);
+            top_k_docs[i--] = res_doc;
         }
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, query_batch_id, qid);
