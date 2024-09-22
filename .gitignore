@@ -1,1 +1,5 @@
 *.pickle
+*.tar
+*.tar.*
+gist/
+miniset/
