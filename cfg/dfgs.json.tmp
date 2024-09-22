@@ -39,7 +39,8 @@
                 { 
                         "top_num_centroids":2,
                         "final_top_k":2,
-                        "include_llm":false
+                        "include_llm":false,
+                        "retrieve_docs":true
                 }],
                 "destinations": [{}]
             }

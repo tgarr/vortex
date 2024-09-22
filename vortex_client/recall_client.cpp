@@ -4,28 +4,32 @@
 #include <iostream>
 #include <unistd.h>  
 #include <vector>
+#include <nlohmann/json.hpp>
 
 using namespace derecho::cascade;
 
 //TODO: change these to read from dfgs json
-#define EMBEDDING_DIM 960
-#define TOP_K 5
+//#define EMBEDDING_DIM 960
+//#define TOP_K 5
 #define VORTEX_SUBGROUP_INDEX 0
 #define AGG_SUBGROUP_INDEX 0
 #define QUERY_FILENAME "query.csv"
 #define QUERY_EMB_FILENAME "query_emb.csv"
 #define GROUNDTRUTH_FILENAME "groundtruth.csv"
 
+static int EMBEDDING_DIM = 0;
+static uint TOP_K = 0;
+
 // Use vector since one query may be reuse for multiple times
 std::unordered_map<std::string, std::vector<std::tuple<int, int>>> sent_queries;
 std::unordered_map<std::string, std::vector<std::string>> query_results;
 
-std::string get_doc_index_from_obj_path(std::string obj_path) {
+std::string get_doc_index_from_obj_path(const std::string& obj_path) {
      std::string doc_index = obj_path.substr(obj_path.find_last_of('/') + 1);
      return doc_index;
 }
 
-uint get_query_num(std::string obj_path) {
+uint get_query_num(const std::string& obj_path) {
      std::string doc_index = obj_path.substr(obj_path.find_last_of(' ') + 1);
      return stoi(doc_index);
 }
@@ -37,6 +41,25 @@ bool arr_contains(const std::string arr[], int size, const std::string& value) {
         }
     }
     return false; // Not found
+}
+
+nlohmann::json get_json_from_file(const std::string& filename) {
+     std::ifstream f(filename);
+     return nlohmann::json::parse(f);
+}
+
+auto get_prop_from_config(const nlohmann::json& json, const std::string& pathname, const std::string& prop) {
+     nlohmann::json graph = json[0]["graph"];
+     for (const auto& element : graph) {
+          if(element["pathname"] == pathname) {
+               if (element["user_defined_logic_config_list"][0].contains(prop)) {
+                    return element["user_defined_logic_config_list"][0][prop];
+               } else {
+                    throw std::runtime_error("Property " + prop + " not found in user_defined_logic_config_list.");
+               }
+          }    
+     }
+     throw std::runtime_error("Pathname " + pathname + " not found in the configuration.");
 }
 
 int read_queries(std::filesystem::path query_filepath, int num_queries, int batch_size, std::vector<std::string>& queries) {
@@ -409,6 +432,11 @@ int main(int argc, char** argv){
           std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_dir.csv> -i <interval>" << std::endl;
           return 1;
      }
+
+     nlohmann::json config = get_json_from_file("dfgs.json");
+     //std::cout << config.dump(4) << std::endl;
+     EMBEDDING_DIM = get_prop_from_config(config, "/rag/emb/clusters_search", "emb_dim");
+     TOP_K = get_prop_from_config(config, "/rag/generate/agg", "final_top_k");
 
      std::cout << "Number of queries: " << num_queries << std::endl;
      std::cout << "Batch size: " << batch_size << std::endl;

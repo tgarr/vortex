@@ -16,7 +16,6 @@ namespace cascade{
 
 #define MY_UUID     "11a3c123-3300-31ac-1866-0003ac330000"
 #define MY_DESC     "UDL to aggregate the knn search results for each query from the clusters and run LLM with the query and its top_k closest docs."
-#define SKIP_DOC_RETRIEVAL false
 
 std::string get_uuid() {
     return MY_UUID;
@@ -73,6 +72,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
     int top_k = 5; // final top K results to use for LLM
     int top_num_centroids = 4; // number of top K clusters need to wait to gather for each query
     int include_llm = false; // 0: not include, 1: include
+    int retrieve_docs = true; // 0: not retrieve, 1: retrieve
 
     std::unordered_map<int, std::unordered_map<long, std::string>> doc_tables; // cluster_id -> emb_index -> pathname
     /*** TODO: use a more efficient way to store the doc_contents cache */
@@ -159,7 +159,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
 #endif 
         auto& pathname = doc_tables[cluster_id][emb_index];
 
-        if(SKIP_DOC_RETRIEVAL){
+        if(!retrieve_docs){
             res_doc = pathname;
             return true;
         }
@@ -310,9 +310,12 @@ public:
             if (config.contains("include_llm")) {
                 this->include_llm = config["include_llm"].get<bool>();
             }
+            if (config.contains("retrieve_docs")) {
+                this->retrieve_docs = config["retrieve_docs"].get<bool>();
+            }
         } catch (const std::exception& e) {
-            std::cerr << "Error: failed to convert top_num_centroids, top_k or include_llm from config" << std::endl;
-            dbg_default_error("Failed to convert top_num_centroids, top_k or include_llm from config, at clusters_search_udl.");
+            std::cerr << "Error: failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config" << std::endl;
+            dbg_default_error("Failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config, at clusters_search_udl.");
         }
     }
 };
