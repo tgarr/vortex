@@ -17,6 +17,7 @@ namespace cascade{
 #define MY_UUID     "11a3c123-3300-31ac-1866-0003ac330000"
 #define MY_DESC     "UDL to aggregate the knn search results for each query from the clusters and run LLM with the query and its top_k closest docs."
 
+
 std::string get_uuid() {
     return MY_UUID;
 }
@@ -25,8 +26,7 @@ std::string get_description() {
     return MY_DESC;
 }
 
-
-struct ClusterSearchResults{
+struct QuerySearchResults{
     const std::string query_text;
     int total_cluster_num = 0;
     std::vector<int> collected_cluster_ids;
@@ -34,8 +34,10 @@ struct ClusterSearchResults{
     int top_k = 0;
     // min heap to keep the top_k docIndex across clusters' results
     std::priority_queue<DocIndex> agg_top_k_results;
+    std::vector<std::string> top_k_docs;
+    bool retrieved_top_k_docs = false;
 
-    ClusterSearchResults(const std::string& query_text, int total_cluster_num, int top_k): 
+    QuerySearchResults(const std::string& query_text, int total_cluster_num, int top_k): 
                          query_text(query_text), total_cluster_num(total_cluster_num), top_k(top_k) {}
 
     bool is_all_results_collected(){
@@ -47,11 +49,15 @@ struct ClusterSearchResults{
         return collected_all_results;
     }
 
-    bool add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results){
+    /***
+     *  return true if the cluster_id's result has been collected before for the same query
+     *  return false if the cluster_id has not been collected bofore, and as been added to this query's QuerySearchResults
+     */
+    void add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results){
         if(std::find(collected_cluster_ids.begin(), collected_cluster_ids.end(), cluster_id) != collected_cluster_ids.end()){
-            std::cerr << "ERROR: cluster id=" << cluster_id << " search result is already collected for query=" << this->query_text << std::endl;
-            dbg_default_error("{} received same cluster={} result for query={}.", __func__, cluster_id, this->query_text);
-            return false;
+            // std::cerr << "Error: cluster_id=" << cluster_id << " has been collected before for the query=" << query_text << std::endl;
+            // dbg_default_error("cluster_id={} has been collected before for the query={}.", cluster_id, query_text);
+            return;
         }
         this->collected_cluster_ids.push_back(cluster_id);
         // Add the cluster_results to the min_heap, and keep the size of the heap to be top_k
@@ -63,8 +69,17 @@ struct ClusterSearchResults{
                 agg_top_k_results.push(doc_index);
             }
         }
-        return true;
     }
+};
+
+struct QueryRequestSource{
+    uint32_t client_id;
+    uint32_t query_batch_id;
+    int total_cluster_num;
+    int received_cluster_result_count;
+    bool finished_process; // true if the result of this query has been sent back to the client that sent this query
+    QueryRequestSource(uint32_t client_id, uint32_t query_batch_id, int total_cluster_num, int received_cluster_result_count, bool finished_process):
+                       client_id(client_id), query_batch_id(query_batch_id), total_cluster_num(total_cluster_num), received_cluster_result_count(received_cluster_result_count), finished_process(finished_process) {}
 };
 
 class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
@@ -77,11 +92,18 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
     std::unordered_map<int, std::unordered_map<long, std::string>> doc_tables; // cluster_id -> emb_index -> pathname
     /*** TODO: use a more efficient way to store the doc_contents cache */
     std::unordered_map<int,std::unordered_map<long, std::string>> doc_contents; // {cluster_id0:{ emb_index0: doc content0, ...}, cluster_id1:{...}, ...}
-    /*** query_result: query_text -> ClusterSearchResults 
+    /*** query_result: query_text -> QuerySearchResults 
      *   is a UDL local cache to store the cluster search results for queries that haven't notified the client 
      *   (due to not all cluster results are collected)
     */
-    std::unordered_map<std::string, std::unique_ptr<ClusterSearchResults>> query_results; // 
+    std::unordered_map<std::string, std::unique_ptr<QuerySearchResults>> query_results; 
+    /*** since same query may appear in different query batches from different clients. i.e. different people ask the same question
+     *  query_request_tracker: query_text -> [(client_id, query_batch_id, finished_process), ..]
+     *  query_request_tracker keep track of the batched query requests that requested the same type of query.
+     *  This is used as a helper field for caching the query_results, and early reply to the client if the results are ready
+     *  to delay garbage collection of the results for a query if there is still requesting qb.
+    */
+    std::unordered_map<std::string, std::vector<QueryRequestSource>> query_request_tracker; 
 
 
     int my_id; // the node id of this node; logging purpose
@@ -158,13 +180,10 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_START, this->my_id, emb_index, cluster_id);
 #endif 
         auto& pathname = doc_tables[cluster_id][emb_index];
-
         if(!retrieve_docs){
             res_doc = pathname;
             return true;
         }
-
-        
         auto get_doc_results = typed_ctxt->get_service_client_ref().get(pathname);
         auto& reply = get_doc_results.get().begin()->second.get();
         if (reply.blob.size == 0) {
@@ -181,6 +200,53 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_END, this->my_id, emb_index, cluster_id);
 #endif
         return true;
+    }
+
+    /*** Helper function to add intermediate result to udl cache
+     *   check if the query existed in the cache
+     *   and if all the results are collected for the query
+     *   If all results are collected, return the top_k docs for the query
+     *   If not all results collected, add this qb_id to the tracker
+     */
+    bool check_query_request_finished(const std::string& query_text, const uint32_t& client_id, const uint32_t& query_batch_id){
+        auto& tracked_query_request = query_request_tracker[query_text];
+        for (auto& q_source : tracked_query_request) {
+            if (q_source.client_id == client_id && q_source.query_batch_id == query_batch_id ) {
+                q_source.received_cluster_result_count += 1;
+                if (q_source.received_cluster_result_count > q_source.total_cluster_num) {
+                    std::cerr << "Error: received_cluster_result_count" << q_source.received_cluster_result_count << ">total_cluster_num=" << q_source.total_cluster_num << std::endl;
+                    assert (q_source.received_cluster_result_count <= q_source.total_cluster_num);
+                }
+                return q_source.finished_process;
+            }
+        }
+        query_request_tracker[query_text].emplace_back(client_id, query_batch_id, this->top_num_centroids, 1, false);
+        return false;
+    }
+
+    void garbage_collect_query_results(const std::string& query_text, const uint32_t& client_id, const uint32_t& query_batch_id){
+        auto& tracked_query_request = query_request_tracker[query_text];
+        for (auto it = tracked_query_request.begin(); it != tracked_query_request.end(); ++it) {
+            if (it->client_id == client_id && it->query_batch_id == query_batch_id) {
+                it->finished_process = true;
+                break;
+            } 
+        }
+        /*** check if all the cluster search result of this query has been processed. 
+         * If not, keep the query in the tracker longer, because this UDL will be triggered again by the remaining cluster search DULs results,
+         * in which case, we would skip processing the query again.
+        */
+        bool all_finished = true;
+        for (const auto& query_tracker : tracked_query_request) {
+            if (!query_tracker.finished_process || query_tracker.received_cluster_result_count < query_tracker.total_cluster_num) {
+                all_finished = false;
+                break;
+            }
+        }
+        if (all_finished) {
+            query_results.erase(query_text);
+            query_request_tracker.erase(query_text);
+        }
     }
 
 
@@ -200,7 +266,7 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
         }
         
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-        int query_batch_id = batch_id * 100000 + qid % 100000; // cast down qid for logging purpose
+        int query_batch_id = batch_id * QUERY_BATCH_ID_MODULUS + qid % QUERY_BATCH_ID_MODULUS; // cast down qid for logging purpose
         TimestampLogger::log(LOG_TAG_AGG_UDL_START,client_id,query_batch_id,cluster_id);
 #endif
         dbg_default_trace("[AggregateGenUDL] receive cluster search result from cluster{}.", cluster_id);
@@ -217,16 +283,25 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE, client_id, query_batch_id, cluster_id);
 #endif
-        // 2. add the cluster_results to the query_results and check if all results are collected
+        /*** 1.1 If the query result has sent back to the client before, skip sending it again.
+         * To handle the case where multiple different client send the same query 
+         *  At aggregation step, we could use the local cache to directly send back to client what were collected before
+         *  But UDL2 doesn't have caching and unaware of the same query, so it would recomputes KNN for the same query embedding and
+         *  then trigger this UDL multiple time even after we send back the result to the client already. 
+         *  This is to avoid sending the same result to the client multiple times.
+        */
         if (query_results.find(query_text) == query_results.end()) {
-            query_results[query_text] = std::make_unique<ClusterSearchResults>(query_text, top_num_centroids, top_k);
-        }
-        bool added_cluster_result = query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
-        if (!added_cluster_result) {
-            std::cerr << "Error: failed to add the cluster search result for query=" << query_text << " and cluster_id=" << cluster_id << std::endl;
-            dbg_default_error("Failed to add the cluster search result for query={} and cluster_id={}.", query_text, cluster_id);
+            query_results[query_text] = std::make_unique<QuerySearchResults>(query_text, top_num_centroids, top_k);
+            query_request_tracker[query_text] = std::vector<QueryRequestSource>();
+        } 
+        if (check_query_request_finished(query_text, client_id, query_batch_id)) {
+            // check if need to garbage clean the query results if all of its cluster_results have been processed
+            garbage_collect_query_results(query_text, client_id, query_batch_id); 
             return;
         }
+        // 2. add the cluster_results to the query_results and check if all results are collected
+        query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
+        // 3. check if all cluster results are collected for this query
         if (!query_results[query_text]->is_all_results_collected()) {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, query_batch_id, cluster_id);
@@ -236,50 +311,53 @@ class AggGenOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, client_id, query_batch_id, cluster_id);
 #endif
-        // 3. All cluster results are collected for this query, aggregate the top_k results
-        auto& agg_top_k_results = query_results[query_text]->agg_top_k_results;
-        // 4. get the top_k docs content
-        std::vector<std::string> top_k_docs(agg_top_k_results.size());
-        uint i = agg_top_k_results.size() - 1;
-        while (!agg_top_k_results.empty()) {
-            auto doc_index = agg_top_k_results.top();
-            agg_top_k_results.pop();
-            std::string res_doc;
-            bool find_doc = get_doc(typed_ctxt,doc_index.cluster_id, doc_index.emb_id, res_doc);
-            if (!find_doc) {
-                std::cerr << "Error: failed to get_doc for cluster_id=" << doc_index.cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
-                dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", doc_index.cluster_id, doc_index.emb_id);
-                return;
+        // 4. All cluster results are collected. Retrieve the top_k docs contents
+        if (!query_results[query_text]->retrieved_top_k_docs) {
+            auto& agg_top_k_results = query_results[query_text]->agg_top_k_results;
+            auto& top_k_docs = query_results[query_text]->top_k_docs;
+            top_k_docs.resize(agg_top_k_results.size());
+            int i = agg_top_k_results.size();
+            while (!agg_top_k_results.empty()) {
+                i--;
+                auto doc_index = agg_top_k_results.top();
+                agg_top_k_results.pop();
+                std::string res_doc;
+                bool find_doc = get_doc(typed_ctxt,doc_index.cluster_id, doc_index.emb_id, res_doc);
+                if (!find_doc) {
+                    std::cerr << "Error: failed to get_doc for cluster_id=" << doc_index.cluster_id << " and emb_id=" << doc_index.emb_id << std::endl;
+                    dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", doc_index.cluster_id, doc_index.emb_id);
+                    return;
+                }
+                top_k_docs[i] = std::move(res_doc);
             }
-            top_k_docs[i--] = res_doc;
-        }
+            query_results[query_text]->retrieved_top_k_docs = true;
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-        TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, query_batch_id, qid);
+            TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, query_batch_id, qid);
 #endif
+        }
         // 5. run LLM with the query and its top_k closest docs
 
         // 6. put the result to cascade and notify the client
         // convert the query and top_k_docs to a json object
         nlohmann::json result_json;
         result_json["query"] = query_text;
-        result_json["top_k_docs"] = top_k_docs;
+        result_json["top_k_docs"] = query_results[query_text]->top_k_docs;
+        result_json["query_batch_id"] = query_batch_id;
         std::string result_json_str = result_json.dump();
         // put the result to cascade
-        std::string result_key = "/rag/results/" + std::to_string(client_id) + "/" + std::to_string(qid);
-        ObjectWithStringKey result_obj(result_key, reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
+        Blob result_blob(reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
         try {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-            /*** TODO: encode qid in result, so that the client could log the corresponding query ***/
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
 #endif
             std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
-            typed_ctxt->get_service_client_ref().notify(result_obj.blob,notification_pathname,client_id);
+            typed_ctxt->get_service_client_ref().notify(result_blob,notification_pathname,client_id);
             dbg_default_trace("[AggregateGenUDL] echo back to node {}", client_id);
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
 #endif
             // 7. (garbage collection) remove query and query_result from the cache
-            query_results.erase(query_text);
+            garbage_collect_query_results(query_text, client_id, query_batch_id);
         } catch (derecho::derecho_exception& ex) {
             std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
             dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());

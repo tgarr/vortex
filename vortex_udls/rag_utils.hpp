@@ -2,6 +2,7 @@
 #include <queue>
 #include <vector>
 
+#define QUERY_BATCH_ID_MODULUS 100000
 
 /***
 * Helper function for logging purpose, to extract the query information from the key

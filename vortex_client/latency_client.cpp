@@ -4,16 +4,21 @@
 #include <iostream>
 #include <unistd.h>  
 #include <vector>
+#include "../vortex_udls/rag_utils.hpp"
 
 using namespace derecho::cascade;
 #define EMBEDDING_DIM 1024
+#define MAX_NUM_EMB_PER_OBJ 200  // maximum number of embeddings could be batched per object
 #define VORTEX_SUBGROUP_INDEX 0
 #define AGG_SUBGROUP_INDEX 0
 #define QUERY_FILENAME "query.csv"
 #define QUERY_EMB_FILENAME "query_emb.csv"
 
-// Use vector since one query may be reuse for multiple times
-std::unordered_map<std::string, std::vector<std::tuple<int, int>>> sent_queries;
+// Use vector since one query may be reuse for multiple times among different batches. 
+// sent_queries: query_text -> batch_id
+// Note, we are currently not handling the case if there are duplicated queries in the same batch. 
+// TODO: this should be done at client side, here. To avoid send batch with duplication but keep track of it to return to the RESTFUL clients that have the same query.
+std::unordered_map<std::string, std::vector<uint32_t>> sent_queries;
 std::unordered_map<std::string, std::string> query_results;
 
 int read_queries(std::filesystem::path query_filepath, int num_queries, int batch_size, std::vector<std::string>& queries) {
@@ -92,9 +97,9 @@ std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::v
 }
 
 /***
- * Result JSON is in format of : {"query": query_text, "top_k_docs":[doc_text1, doc_text2, ...]}
+ * Result JSON is in format of : {"query": query_text, "top_k_docs":[doc_text1, doc_text2, ...], "query_batch_id": query_batch_id}
  */
-bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs) {
+bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs,uint32_t& query_batch_id) {
      if (blob.size == 0) {
           std::cerr << "Error: empty result blob." << std::endl;
           return false;
@@ -110,15 +115,7 @@ bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<s
           }
           query_text = parsed_json["query"];
           top_k_docs = parsed_json["top_k_docs"];
-
-          // // Print the query_text
-          // std::cout << "Query: " << query_text << std::endl;
-
-          // // Print the contents of top_k_docs
-          // std::cout << "Top K Docs:" << std::endl;
-          // for (const auto& doc : top_k_docs) {
-          //   std::cout << doc << std::endl;
-          // }
+          query_batch_id = parsed_json["query_batch_id"];
 
      } catch (const nlohmann::json::parse_error& e) {
           std::cerr << "Result JSON parse error: " << e.what() << std::endl;
@@ -139,12 +136,13 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
      std::cout << "Created object pool for results: " << result_pool_name << std::endl;
      // 1.2. Register notification for this object pool
      std::atomic<bool> running(true);
-     std::atomic<int> num_queries_to_send(num_queries);
+     std::atomic<int> num_queries_to_send(num_queries*batch_size);
      bool ret = capi.register_notification_handler(
                [&](const Blob& result){
                     std::string query_text;
                     std::vector<std::string> top_k_docs;
-                    if (!deserialize_result(result, query_text, top_k_docs)) {
+                    uint32_t query_batch_id;
+                    if (!deserialize_result(result, query_text, top_k_docs, query_batch_id)) {
                          std::cerr << "Error: failed to deserialize the result from the notification." << std::endl;
                          return false;
                     }
@@ -152,24 +150,23 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
                          query_results[query_text] = top_k_docs[0];
                     }
                     if (sent_queries.find(query_text) != sent_queries.end()) {
-                         for (auto& [qb_id, q_id]: sent_queries[query_text]) {
+                         uint32_t batch_id = query_batch_id / QUERY_BATCH_ID_MODULUS;
+                         uint32_t q_id = query_batch_id % QUERY_BATCH_ID_MODULUS;
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-                              TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,qb_id,q_id);
+                         TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,query_batch_id,q_id);
 #endif
-                              // std::cout << "Received result for query: " << query_text << " from client: " << my_id << " qb_id: " << qb_id << " q_id: " << q_id << std::endl;
-                              // remove [qb_id, q_id] from sent_queries
-                              sent_queries[query_text].erase(std::remove(sent_queries[query_text].begin(), sent_queries[query_text].end(), std::make_tuple(qb_id, q_id)), sent_queries[query_text].end());
-                              if (sent_queries[query_text].size() == 0) {
-                                   sent_queries.erase(query_text);
-                              }
-                              break;
+                         // std::cout << "Received result for query: " << query_text << " from client: " << my_id << " batch_id: " << batch_id << " q_id: " << q_id << std::endl;
+                         // remove batch_id from sent_queries
+                         sent_queries[query_text].erase(std::remove(sent_queries[query_text].begin(), sent_queries[query_text].end(), batch_id), sent_queries[query_text].end());                        
+                         if (sent_queries[query_text].size() == 0) {
+                              sent_queries.erase(query_text);
                          }
                     } else {
                          std::cerr << "Error: received result for query that is not sent." << std::endl;
                     }
                     if (sent_queries.size() == 0 && num_queries_to_send.load() == 0) {
                          running = false;
-                         // std::cout << "Received all results." << std::endl;
+                         std::cout << "Received all results." << std::endl;
                     }
                     return true;
                }, result_pool_name);
@@ -217,25 +214,32 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           query_embs = std::move(new_embs);
           num_emb_collected = num_query_collected;
      }
-     
+     if (num_query_collected < batch_size){
+          std::cerr << "Error: total number of queries in the dataset are not large enough for the batch size." << std::endl;
+          return false;
+     }
 
      // 3. send the queries to the cascade
-     for (int qb_id = 0; qb_id < num_queries; qb_id++) {
-          std::string key = "/rag/emb/centroids_search/client" + std::to_string(my_id) + "/qb" + std::to_string(qb_id);
+     for (int batch_id = 0; batch_id < num_queries; batch_id++) {
+          std::string key = "/rag/emb/centroids_search/client" + std::to_string(my_id) + "/qb" + std::to_string(batch_id);
           /*** TODO: current method of prepare query text and emb cause extra copies that could be avoided. ***/
           // 3.1. Prepare the query texts
           std::vector<std::string> cur_query_list;
+          std::vector<int> cur_query_ids;
+          int qb_start_loc = batch_id * batch_size;
           for (int j = 0; j < batch_size; ++j) {
-              cur_query_list.push_back(queries[(qb_id + j) % num_query_collected]);
-              if (sent_queries.find(queries[(qb_id + j) % num_query_collected]) == sent_queries.end()) {
-                   sent_queries[queries[(qb_id + j) % num_query_collected]] = std::vector<std::tuple<int, int>>();
+               int pos = (qb_start_loc + j) % num_query_collected;
+              cur_query_list.push_back(queries[pos]);
+              cur_query_ids.push_back(pos);
+              if (sent_queries.find(queries[pos]) == sent_queries.end()) {
+                   sent_queries[queries[pos]] = std::vector<uint32_t>();
               }
-              sent_queries[queries[(qb_id + j) % num_query_collected]].push_back(std::make_tuple(qb_id, j));
+              sent_queries[queries[pos]].push_back((uint32_t)batch_id);
           }
           // 3.2. Prepare query embeddings
           std::unique_ptr<float[]> query_embeddings(new float[EMBEDDING_DIM * batch_size]);
           for (int j = 0; j < batch_size; ++j) {
-               int pos = (qb_id * batch_size + j) % num_emb_collected;
+               int pos = (qb_start_loc + j) % num_emb_collected;
                for (int k = 0; k < EMBEDDING_DIM; ++k) {
                     query_embeddings[j * EMBEDDING_DIM + k] = query_embs[pos * EMBEDDING_DIM + k];
                }
@@ -248,13 +252,13 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           // 3.4. send the object to the cascade
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < batch_size; ++j) {
-               TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,my_id,qb_id,j);
+               TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,my_id,batch_id,j);
           }
 #endif
           capi.put_and_forget(emb_query_obj, false); // not only trigger the UDL, but also update state. TODO: Need more thinking here. 
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < batch_size; ++j) {
-               TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,my_id,qb_id,j);
+               TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,my_id,batch_id,j);
           }
 #endif
           num_queries_to_send -= batch_size;
@@ -264,12 +268,13 @@ bool run_latency_test(ServiceClientAPI& capi, int num_queries, int batch_size, s
           // while (std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - start).count() < query_interval) {
           //      // busy waiting
           // }
-          if (qb_id % 200 == 0) {
-               std::cout << "Sent " << qb_id << " queries." << std::endl;
+          if (batch_id % 200 == 0) {
+               std::cout << "Sent " << batch_id << " queries." << std::endl;
           }
      }
      
      std::cout << "Put all queries to cascade." << std::endl;
+
      // std::this_thread::sleep_for(std::chrono::seconds(10));
      // running = false;
      // message_thread.join();
@@ -328,6 +333,10 @@ int main(int argc, char** argv){
      if (num_queries == 0 || batch_size == 0 || query_directory.empty()) {
           std::cerr << "Error: Missing required options." << std::endl;
           std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_dir.csv> -i <interval>" << std::endl;
+          return 1;
+     }
+     if (batch_size > MAX_NUM_EMB_PER_OBJ) {
+          std::cerr << "Error: batch_size="<< batch_size << " exceeds MAX_NUM_EMB_PER_OBJ=" << MAX_NUM_EMB_PER_OBJ << "." << std::endl;
           return 1;
      }
 
