@@ -3,6 +3,7 @@
 #include <vector>
 
 #define QUERY_BATCH_ID_MODULUS 100000
+#define CLUSTER_KEY_DELIMITER "_cluster"
 
 /***
 * Helper function for logging purpose, to extract the query information from the key
