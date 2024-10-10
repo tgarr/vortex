@@ -1,14 +1,7 @@
-#include <memory>
-#include <map>
 #include <iostream>
-#include <unordered_map>
+#include <thread>
 
-#include <cascade/user_defined_logic_interface.hpp>
-#include <cascade/utils.hpp>
-#include <cascade/cascade_interface.hpp>
-#include <derecho/openssl/hash.hpp>
-
-#include "grouped_embeddings_for_search.hpp"
+#include "search_worker.hpp"
 
 
 namespace derecho{
@@ -26,54 +19,23 @@ std::string get_description() {
 }
 
 class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
-
-    // maps from cluster ID -> embeddings of that cluster, 
-    // because there could be more than 1 clusters hashed to one node by affinity set.
-    std::unordered_map<int, std::unique_ptr<GroupedEmbeddingsForSearch>> clusters_embs;
-
-    // faiss example uses 64. These two values could be set by config in dfgs.json.tmp file
+    // These two values could be set by config in dfgs.json.tmp file
     int emb_dim = 64; // dimension of each embedding
     uint32_t top_k = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
 
+    // maps from cluster ID -> embeddings of that cluster, 
+    // use std::unique_ptr to allow multithreading adding queries to different GroupedEmbeddingsForSearch objects
+    std::unordered_map<int, std::unique_ptr<GroupedEmbeddingsForSearch>> cluster_search_index;
+
     int my_id; // the node id of this node; logging purpose
 
-
-    /***
-     * Format the new_keys for the search results of the queries
-     * it is formated as client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}_qid{hash(query)}
-     * @param new_keys the new keys to be constructed
-     * @param key_string the key string of the object
-     * @param query_list a list of query strings
-    ***/
-    inline void construct_new_keys(std::vector<std::string>& new_keys,
-                                                       const std::string& key_string, 
-                                                       const std::vector<std::string>& query_list) {
-        for (const auto& query : query_list) {
-            std::string hashed_query;
-            try {
-                /*** TODO: do we need 32 bytes of hashed key? will simply int be sufficient? */
-                uint8_t digest[32];
-                openssl::Hasher sha256(openssl::DigestAlgorithm::SHA256);
-                const char* query_cstr = query.c_str();
-                sha256.hash_bytes(query_cstr, strlen(query_cstr), digest);
-                std::ostringstream oss;
-                for (int i = 0; i < 32; ++i) {
-                    // Output each byte as a decimal value (0-255) without any leading zeros
-                    oss << std::dec << static_cast<int>(digest[i]);
-                }
-                hashed_query = oss.str();
-            } catch(openssl::openssl_error& ex) {
-                dbg_default_error("Unable to compute SHA256 of typename. string = {}, exception name = {}", query, ex.what());
-                throw;
-            }
-            std::string new_key = key_string + "_qid" + hashed_query;
-            new_keys.push_back(new_key);
-        }
-    }
-
-
-
+    mutable std::shared_mutex cluster_search_index_map_mutex;
+    mutable std::condition_variable_any cluster_search_index_cv;
+    std::atomic<bool> execution_thread_running = true;
+    std::thread search_worker_thread;
+    
+private:
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
                                const std::string& key_string,
@@ -81,12 +43,12 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
+
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
         // 0. get the cluster ID
         int cluster_id;
-        std::string cluster_delimiter = "_cluster";  // move this to rag_utils as macro
-        bool extracted_clusterid = parse_number(key_string, cluster_delimiter, cluster_id); // TODO: get the cluster ID from the object
+        bool extracted_clusterid = parse_number(key_string, CLUSTER_KEY_DELIMITER, cluster_id); 
         if (!extracted_clusterid) {
             std::cerr << "Error: cluster ID not found in the key_string" << std::endl;
             dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
@@ -100,28 +62,33 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,client_id,query_batch_id,cluster_id);
 #endif
-        // 1. compute knn for the corresponding cluster on this node
-        // 1.1. check if local cache contains the embeddings of the cluster
-        auto it = this->clusters_embs.find(cluster_id);
-        if (it == this->clusters_embs.end()){
+        // 1. check if local cache contains the embeddings of the cluster
+        // std::unique_lock<std::mutex> lock(this->cluster_search_index_map_mutex);
+        {
+            std::shared_lock<std::shared_mutex> read_lock(cluster_search_index_map_mutex);
+            auto it = this->cluster_search_index.find(cluster_id);
+            if (it == this->cluster_search_index.end()){
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START,this->my_id,cluster_id,0);
+                TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START,this->my_id,cluster_id,0);
 #endif
-            this->clusters_embs[cluster_id]= std::make_unique<GroupedEmbeddingsForSearch>(this->faiss_search_type, this->emb_dim);
-            std::string cluster_prefix = "/rag/emb/cluster" + std::to_string(cluster_id);
-            int filled_cluster_embs = this->clusters_embs[cluster_id]->retrieve_grouped_embeddings(cluster_prefix,typed_ctxt);
-            if (filled_cluster_embs == -1) {
-                std::cerr << "Error: failed to fill the cluster embeddings in cache" << std::endl;
-                dbg_default_error("Failed to fill the cluster embeddings in cache, at clusters_search_udl.");
-                return;
+                read_lock.unlock();
+                std::unique_lock<std::shared_mutex> write_lock(cluster_search_index_map_mutex);
+                // load the embeddings of the cluster from the cascade
+                
+                this->cluster_search_index[cluster_id]= std::make_unique<GroupedEmbeddingsForSearch>(this->faiss_search_type, this->emb_dim);
+                std::string cluster_prefix = "/rag/emb/cluster" + std::to_string(cluster_id);
+                int filled_cluster_embs = this->cluster_search_index[cluster_id]->retrieve_grouped_embeddings(cluster_prefix,typed_ctxt);
+                if (filled_cluster_embs == -1) {
+                    std::cerr << "Error: failed to fill the cluster embeddings in cache" << std::endl;
+                    dbg_default_error("Failed to fill the cluster embeddings in cache, at clusters_search_udl.");
+                    return;
+                }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+                TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_END,this->my_id,cluster_id,0);
+#endif
+                it = this->cluster_search_index.find(cluster_id);
             }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_END,this->my_id,cluster_id,0);
-#endif
-            it = this->clusters_embs.find(cluster_id);
         }
-        // 1.2. get the embeddings of the cluster
-        auto& embs = it->second;
 
         // 2. get the query embeddings from the object
 
@@ -141,45 +108,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,client_id,query_batch_id,cluster_id);
 #endif
-
-        // 3. search the top K embeddings that are close to the query
-        long* I = new long[this->top_k * nq];
-        float* D = new float[this->top_k * nq];
-        embs->search(nq,data,this->top_k,D,I);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-        TimestampLogger::log(LOG_CLUSTER_SEARCH_FAISS_SEARCH_END,client_id,query_batch_id,cluster_id);
-#endif
-        dbg_default_trace("[Cluster search ocdpo] Finished knn search for key: {}.", key_string);
-
-        // 4. emit the results to the subsequent UDL query-by-query
-        // 4.1 construct new keys for all queries in this search
-        std::vector<std::string> new_keys;
-        construct_new_keys(new_keys, key_string, query_list);
-        dbg_default_trace("[Cluster search ocdpo] constructed new keys: {}.", key_string);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-        TimestampLogger::log(LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END,client_id,query_batch_id,cluster_id);
-#endif
-        int idx = 0;
-        for (auto it = query_list.begin(); it != query_list.end(); ++it) {
-            // 4.2 format the search result
-            std::string query_emit_content = serialize_cluster_search_result(this->top_k, I, D, idx, *it);
-            Blob blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
-            // 4.3 emit the result
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,client_id,query_batch_id,cluster_id);
-#endif
-            emit(new_keys[idx], EMIT_NO_VERSION_AND_TIMESTAMP , blob);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-            TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_END,client_id,query_batch_id,cluster_id);
-#endif
-            dbg_default_trace("[Cluster search ocdpo]: Emitted key:{} " ,new_keys[idx]);
-            idx ++;
-        }
-        delete[] I;
-        delete[] D;
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-        TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_END,client_id,query_batch_id,cluster_id);
-#endif
+        cluster_search_index.at(cluster_id)->add_queries(nq, data, std::move(query_list), key_string);
+        cluster_search_index_cv.notify_one();
         dbg_default_trace("[Cluster search ocdpo]: FINISHED knn search for key: {}.", key_string );
     }
 
@@ -210,6 +140,20 @@ public:
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;
             dbg_default_error("Failed to convert emb_dim or top_k from config, at clusters_search_udl.");
+        }
+        search_worker_thread = std::thread([this, typed_ctxt]() {
+        ClusterSearchWorker worker(static_cast<int>(top_k), cluster_search_index, cluster_search_index_cv,
+                                       cluster_search_index_map_mutex, execution_thread_running);
+            worker.search_and_emit(typed_ctxt);
+        });
+    }
+
+    /*** TODO: double check the correct way to clean up thread */
+    ~ClustersSearchOCDPO() {
+        execution_thread_running = false;
+        cluster_search_index_cv.notify_all();
+        if (search_worker_thread.joinable()) {
+            search_worker_thread.join();
         }
     }
 };

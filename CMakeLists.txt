@@ -119,7 +119,7 @@ target_include_directories(clusters_search_udl PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
-target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
+target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart pthread)
 
 target_compile_definitions(clusters_search_udl PRIVATE
     LOG_CLUSTER_SEARCH_UDL_START=${LOG_CLUSTER_SEARCH_UDL_START}
