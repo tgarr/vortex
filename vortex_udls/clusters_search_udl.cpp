@@ -33,28 +33,9 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     mutable std::shared_mutex cluster_search_index_map_mutex;
     mutable std::condition_variable_any cluster_search_index_cv;
     std::atomic<bool> execution_thread_running = true;
-    std::atomic<bool> worker_thread_started = false;
     std::thread search_worker_thread;
-    std::mutex search_thread_init_mutex;  // Protects thread initialization
-
-public:
-    ~ClustersSearchOCDPO() {
-        execution_thread_running = false;
-        cluster_search_index_cv.notify_all();
-        if (search_worker_thread.joinable()) {
-            search_worker_thread.join();
-        }
-    }
+    
 private:
-    void start_search_worker(DefaultCascadeContextType* typed_ctxt) {
-        search_worker_thread = std::thread([this, typed_ctxt]() {
-            ClusterSearchWorker worker(static_cast<int>(top_k), cluster_search_index, cluster_search_index_cv,
-                                       cluster_search_index_map_mutex, execution_thread_running);
-            worker.search_and_emit(typed_ctxt);
-        });
-    }
-
-
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
                                const std::string& key_string,
@@ -62,14 +43,6 @@ private:
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override {
-        // Start the worker thread when it is first triggered
-        if (!worker_thread_started.load(std::memory_order_acquire)) {
-            std::lock_guard<std::mutex> lock(search_thread_init_mutex);
-            if (!worker_thread_started.load(std::memory_order_relaxed)) {
-                start_search_worker(typed_ctxt);
-                worker_thread_started.store(true, std::memory_order_release);
-            }
-        }
 
         /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
         dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
@@ -167,6 +140,20 @@ public:
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;
             dbg_default_error("Failed to convert emb_dim or top_k from config, at clusters_search_udl.");
+        }
+        search_worker_thread = std::thread([this, typed_ctxt]() {
+        ClusterSearchWorker worker(static_cast<int>(top_k), cluster_search_index, cluster_search_index_cv,
+                                       cluster_search_index_map_mutex, execution_thread_running);
+            worker.search_and_emit(typed_ctxt);
+        });
+    }
+
+    /*** TODO: double check the correct way to clean up thread */
+    ~ClustersSearchOCDPO() {
+        execution_thread_running = false;
+        cluster_search_index_cv.notify_all();
+        if (search_worker_thread.joinable()) {
+            search_worker_thread.join();
         }
     }
 };
