@@ -46,11 +46,11 @@ public:
         }
     }
 private:
-    void start_search_worker(DefaultCascadeContextType* typed_ctxt, emit_func_t emit_func) {
-        search_worker_thread = std::thread([this, typed_ctxt, emit_func]() {
+    void start_search_worker(DefaultCascadeContextType* typed_ctxt) {
+        search_worker_thread = std::thread([this, typed_ctxt]() {
             ClusterSearchWorker worker(static_cast<int>(top_k), cluster_search_index, cluster_search_index_cv,
                                        cluster_search_index_map_mutex, execution_thread_running);
-            worker.search_and_emit(typed_ctxt, emit_func);
+            worker.search_and_emit(typed_ctxt);
         });
     }
 
@@ -66,7 +66,7 @@ private:
         if (!worker_thread_started.load(std::memory_order_acquire)) {
             std::lock_guard<std::mutex> lock(search_thread_init_mutex);
             if (!worker_thread_started.load(std::memory_order_relaxed)) {
-                start_search_worker(typed_ctxt, emit);
+                start_search_worker(typed_ctxt);
                 worker_thread_started.store(true, std::memory_order_release);
             }
         }
@@ -135,7 +135,7 @@ private:
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CLUSTER_SEARCH_DESERIALIZE_END,client_id,query_batch_id,cluster_id);
 #endif
-        cluster_search_index.at(cluster_id)->add_queries(nq, data, std::move(query_list));
+        cluster_search_index.at(cluster_id)->add_queries(nq, data, std::move(query_list), key_string);
         cluster_search_index_cv.notify_one();
         dbg_default_trace("[Cluster search ocdpo]: FINISHED knn search for key: {}.", key_string );
     }

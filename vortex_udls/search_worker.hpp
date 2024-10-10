@@ -11,6 +11,8 @@
 
 #include "grouped_embeddings_for_search.hpp"
 
+#define EMIT_AGGREGATE_PREFIX "/rag/generate/agg"
+
 namespace derecho{
 namespace cascade{
 class ClusterSearchWorker {
@@ -43,9 +45,11 @@ public:
      * @param query_list a list of query strings
     ***/
     inline void construct_new_keys(std::vector<std::string>& new_keys,
-                                                       const std::string& key_string, 
+                                                       const std::vector<std::string>& query_keys, 
                                                        const std::vector<std::string>& query_list) {
-        for (const auto& query : query_list) {
+        for (size_t i = 0; i < query_keys.size(); ++i) {
+            const std::string& key_string = query_keys[i];
+            const std::string& query = query_list[i];
             std::string hashed_query;
             try {
                 /*** TODO: do we need 32 bytes of hashed key? will simply int be sufficient? */
@@ -69,7 +73,7 @@ public:
     }
 
 
-    void search_and_emit(DefaultCascadeContextType* typed_ctxt, const emit_func_t& emit) {
+    void search_and_emit(DefaultCascadeContextType* typed_ctxt) {
         while (execution_thread_running) {
             std::unique_lock<std::shared_mutex> map_lock(cluster_search_index_map_mutex);
 
@@ -95,21 +99,24 @@ public:
                 auto& [cluster_id, cluster_index] = *it;
 
                 if (cluster_index->has_pending_queries()) {
-                    long* I = nullptr; // searched result index, which should be allocated by the batchedSearch function
+                    long* I = nullptr; // searched result index, which should be allocated by the batched Search function
                     float* D = nullptr; // searched result distance
                     std::vector<std::string> query_list;
-                    bool search_success = cluster_index->batchedSearch(top_k, D, I, query_list);
+                    std::vector<std::string> query_keys;
+                    bool search_success = cluster_index->batchedSearch(top_k, &D, &I, query_list, query_keys);
                     if (!search_success || !I || !D) {
                         dbg_default_error("Failed to batch search for cluster: {}", cluster_id);
                         continue;
                     }
                     std::vector<std::string> new_keys;
-                    construct_new_keys(new_keys, "result_key_prefix", query_list);
+                    construct_new_keys(new_keys, query_keys, query_list);
 
                     for (size_t k = 0; k < query_list.size(); ++k) {
+                        ObjectWithStringKey obj;
+                        obj.key = std::string(EMIT_AGGREGATE_PREFIX) + "/" + new_keys[k];
                         std::string query_emit_content = serialize_cluster_search_result(top_k, I, D, k, query_list[k]);
-                        Blob blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
-                        emit(new_keys[k], EMIT_NO_VERSION_AND_TIMESTAMP, blob);
+                        obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
+                        typed_ctxt->get_service_client_ref().put_and_forget(obj);
                     }
 
                     delete[] I;
