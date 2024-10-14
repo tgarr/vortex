@@ -66,7 +66,7 @@ The dataset used for perf_test could be download from directory ```/setup/perf_d
 
 - hotpot15 is from hotpot dataset(https://hotpotqa.github.io). It contains 899,667 documents with 11,5104,539 tokens, and used for performance testing. We have run encoding of these documents to embeddings using text-embedding-3-small from OpenAI API  and knn clustering them into 15 clusters using FAISS. You can download it by running ```./download_hotpot.sh```
 
-- GIST is a dataset for vector database. It contains 1M emebddings with 960 embedding dimensions. It doesn't include the document text with the dataset, so we could only use its embeddings in the system with result in the format of embedding IDs. You can download via ```./download_gist.sh```. We provided a format script to generate the embeddings in the format of the object to put to cascade. You can run by ``` python format_gist.py```
+- GIST is a dataset for vector database(http://corpus-texmex.irisa.fr). GIST and SIFT are used as a benchmark for FAISS, qbvector, weaviate, ...(https://github.com/tensorflow/datasets/blob/master/docs/catalog/sift1m.md). It contains 1M emebddings with 960 embedding dimensions. It doesn't include the document text with the dataset, so we could only use its embeddings in the system with result in the format of embedding IDs. You can download via ```./download_gist.sh```. We provided a format script to generate the embeddings in the format of the object to put to cascade. You can run by ``` python format_gist.py```
 
 NOTE: More on dfgs.json.tmp settings based on different dataset. 
 
