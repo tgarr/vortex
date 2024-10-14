@@ -2,8 +2,10 @@ import numpy as np
 import faiss
 import pickle
 import os 
+from collections import defaultdict
 
 EMBEDDINGS_LOC = './gist'
+NCENTROIDS = 15
 
 def fvecs_read(filename, dtype=np.float32, c_contiguous=True):
     fv = np.fromfile(filename, dtype=dtype)
@@ -35,6 +37,22 @@ print("query shape", query.shape)
 dimension = base.shape[1]  # Assumes emb_list is a 2D array (num_embeddings, embedding_dim)
 print("dimension", dimension)
 # Create a FAISS index, here we're using an IndexFlatL2 which is a basic index with L2 distance
+
+
+niter = 20
+verbose = True
+d = base.shape[1]
+kmeans = faiss.Kmeans(d, NCENTROIDS, niter=niter, verbose=verbose)
+kmeans.train(base)
+
+print(kmeans.centroids.shape)
+
+D, I = kmeans.index.search(base, 1)
+
+print(D.shape)
+print(I.shape)
+
+
 index = faiss.IndexFlatL2(dimension)
 
 # Add embeddings to the index
@@ -50,9 +68,20 @@ print("Distances to nearest neighbors:", distances)
 print("groundtruth", groundtruth[0])
 
 
-doc_emb_map = {0:{}}
-for i in range(len(base)):
-    doc_emb_map[0][i] = i
+doc_emb_map = defaultdict(dict)
+clustered_embs = [[] for _ in range(NCENTROIDS)]
+embs = base
+for i in range(len(embs)):
+    cluster = I[i][0]
+    if len(I[i]) != 1:
+        print(f"Error in embedding {i}, len {len(I[i])}")
+    clustered_embs[cluster].append(embs[i])
+    emb_id = len(clustered_embs[cluster]) - 1
+    doc_emb_map[cluster][emb_id] = i
+
+# doc_emb_map = {0:{}}
+# for i in range(len(base)):
+#     doc_emb_map[0][i] = i
 
 querytexts = []
 
@@ -60,19 +89,21 @@ for i in range(len(query)):
     querytexts.append("Query " + str(i))
 
 
-testcentroid = np.zeros((1, 960))
+centroids = kmeans.centroids
+#testcentroid = np.zeros((1, 960))
 
 
 os.makedirs(EMBEDDINGS_LOC, exist_ok=True)
 
 with open(f'{EMBEDDINGS_LOC}/centroids.pkl', 'wb') as file:
-    pickle.dump(testcentroid, file)
+    pickle.dump(centroids, file)
 
 with open(f'{EMBEDDINGS_LOC}/embeddings_list.pkl', 'wb') as f:
     pickle.dump(base, f)
 
-with open(f'{EMBEDDINGS_LOC}/cluster_0.pkl', 'wb') as f:
-    pickle.dump(base, f)
+for i in range(NCENTROIDS):
+    with open(f'{EMBEDDINGS_LOC}/cluster_{i}.pkl', 'wb') as f:
+        pickle.dump(clustered_embs[i], f)
 
 with open(f'{EMBEDDINGS_LOC}/doc_emb_map.pkl', 'wb') as f:
     pickle.dump(doc_emb_map, f)
