@@ -5,7 +5,8 @@
 
    NVIDIA toolkit nvcc if run with GPU support
 
-   Python support needs to be built for Python centroids_search_udl
+   You can install it via the script in script/install-faiss.sh. (Note in current Vortex, we use FAISS cpp; FAISS python is not in used, and optional to install)
+
 2. cascade : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223 , with Cascade Python API installed (https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223/src/service/python )
 
 
