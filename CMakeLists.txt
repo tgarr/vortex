@@ -30,29 +30,25 @@ endif()
 add_definitions(-DENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING})
 
 
-# Client log tags
-set(LOG_TAG_QUERIES_SENDING_START 10000)
-set(LOG_TAG_QUERIES_SENDING_END 10001)
-set(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED 10100)
-
-add_executable(latency_client vortex_client/latency_client.cpp)
-target_include_directories(client PRIVATE
+include_directories(
+    ${FAISS_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
 )
-target_link_libraries(latency_client cascade pthread)
-target_compile_definitions(latency_client PRIVATE
-    LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
-    LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
-    LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
-    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
-)
 
-add_executable(recall_client vortex_client/recall_client.cpp)
-target_link_libraries(recall_client cascade pthread)
-target_compile_definitions(recall_client PRIVATE
+add_library(rag_utils STATIC vortex_udls/rag_utils.cpp)
+target_link_libraries(rag_utils PRIVATE cascade)
+
+# Client log tags
+set(LOG_TAG_QUERIES_SENDING_START 10000)
+set(LOG_TAG_QUERIES_SENDING_END 10001)
+set(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED 10100)
+
+add_executable(latency_client benchmark/vortex_client.cpp benchmark/latency_client.cpp)
+target_link_libraries(latency_client cascade pthread rag_utils)
+target_compile_definitions(latency_client PRIVATE
     LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
     LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
     LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
@@ -74,14 +70,7 @@ set(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END 20051)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_END 20100)
 
 add_library(centroids_search_udl SHARED vortex_udls/centroids_search_udl.cpp)
-target_include_directories(centroids_search_udl PRIVATE
-    ${FAISS_INCLUDE_DIRS}
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-)
-target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart)
+target_link_libraries(centroids_search_udl PRIVATE derecho::cascade faiss CUDA::cudart rag_utils)
 target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_START=${LOG_CENTROIDS_EMBEDDINGS_LOADING_START}
@@ -112,14 +101,7 @@ set(LOG_CLUSTER_SEARCH_UDL_END 30100)
 
 
 add_library(clusters_search_udl SHARED vortex_udls/clusters_search_udl.cpp)
-target_include_directories(clusters_search_udl PRIVATE
-    ${FAISS_INCLUDE_DIRS}
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-)
-target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart pthread)
+target_link_libraries(clusters_search_udl PRIVATE derecho::cascade faiss CUDA::cudart pthread rag_utils)
 
 target_compile_definitions(clusters_search_udl PRIVATE
     LOG_CLUSTER_SEARCH_UDL_START=${LOG_CLUSTER_SEARCH_UDL_START}
@@ -150,14 +132,7 @@ set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
 
 add_library(aggregate_generate_udl SHARED vortex_udls/aggregate_generate_udl.cpp)
-target_include_directories(aggregate_generate_udl PRIVATE
-    ${FAISS_INCLUDE_DIRS}
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-)
-target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade)
+target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade rag_utils)
 
 target_compile_definitions(aggregate_generate_udl PRIVATE
     LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
@@ -179,7 +154,9 @@ target_compile_definitions(aggregate_generate_udl PRIVATE
 add_custom_command(TARGET aggregate_generate_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/setup
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/setup
         ${CMAKE_CURRENT_BINARY_DIR}/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/layout.json
@@ -221,6 +198,10 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/clear_log.sh
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_data
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/perf_data
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
@@ -229,10 +210,6 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/latency_client
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/latency_client
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/recall_client
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/recall_client
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/recall_client
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/recall_client
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/run.sh.tmp
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cfg/run.sh.tmp

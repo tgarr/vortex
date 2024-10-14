@@ -13,6 +13,7 @@
 # Configuration
 The configuration of the udls could be found in dfgs.json file.
 
+In cfg/dfgs.json.tmp we set the configuration of the UDLs and their dependencies. Some UDL-specific configurations could be set there including "emb_dim", "faiss_search_type", "top_num_centroids". For faiss_search_type, it is a number (0: CPU flat search, 1: GPU flat search, 2: GPU IVF search, ..). Note, configurations such as "emb_dim", "retrieve_docs" are dataset dependent. For different performance testing on different datasets, they are set differently. More details in 4.1 below.
 
 # Run
 
@@ -54,27 +55,46 @@ After the vector database is constructed, clients could send batch of queries to
 
 
 
-### 4. Performance test
+### 4. Performance testing 
 Client node is run in node n2. For performance testing, we created client side test scripts under the folder ```/perf_test```. 
 
-#### Dataset
+#### 4.1. Dataset
+
 The dataset used for perf_test could be download from directory ```/setup/perf_data```. There are two datasets that prepared for experiments.
 
 -  miniset is a subset of MSMARCO dataset(https://microsoft.github.io/msmarco/). It has around 800 documents, and used for a fast-check of the system. You can download it by running ```./download_miniset.sh```
 
 - hotpot15 is from hotpot dataset(https://hotpotqa.github.io). It contains 899,667 documents with 11,5104,539 tokens, and used for performance testing. We have run encoding of these documents to embeddings using text-embedding-3-small from OpenAI API  and knn clustering them into 15 clusters using FAISS. You can download it by running ```./download_hotpot.sh```
 
-#### Initialize database
+- GIST is a dataset for vector database. It contains 1M emebddings with 960 embedding dimensions. It doesn't include the document text with the dataset, so we could only use its embeddings in the system with result in the format of embedding IDs. You can download via ```./download_gist.sh```. We provided a format script to generate the embeddings in the format of the object to put to cascade. You can run by ``` python format_gist.py```
+
+NOTE: More on dfgs.json.tmp settings based on different dataset. 
+
+For miniset, hotpot15, ``` emb_dim: 1024``` for the first two UDLs, and ```retrieve_docs:true``` for the third UDL.
+
+For GIST dataset, ``` emb_dim: 960``` for the first two UDLs, and ```retrieve_docs:false``` for the third UDL.
+
+#### 4.2. Initialize database
 The initialization step is to put the embeddings and documents to store in Cascade and use at query runtime. We provided a scrip that puts centroids' and clusters' embeddings, documents, and embedding-to-document-pathname map into Cascade. 
 
-You can run ```python perf_test/perf_test_setup.py <dataset_directory>```. The ```<dataset_directory>``` could be either ```setup/perf_data/miniset``` or ```setup/perf_data/hotpot15```, depends on the scale of the experiment.
+You can run ```python setup/perf_test_setup.py -p <dataset_directory> -e <embedding_dimension> [-doc]```. The ```<dataset_directory>``` could be either ```perf_data/miniset``` (embedding dimension 1024) or ```perf_data/hotpot15``` (embedding dimension 1024) or ```perf_data/gist``` (embedding dimension 960) depends on the scale of the experiment. For gist dataset, it doesn't contain document, but for the other two, could include -doc in the script to have it also put doc text into cascade .
 
-#### Run queries
+e.g. ```python setup/perf_test_setup.py -p perf_data/miniset -e 1024 -doc ```
+
+```python setup/perf_test_setup.py -p perf_data/gist -e 960 ```
+
+#### 4.3. Run queries
 After initialize the database, you can start to experiment with putting queries to Vortex and get the result. 
-- latency experiment client. We wrote a program for testing latency of the pipeline. You can run via  ```./latency_client -n <num_requests> -b <batch_size> -q <dataset_director> -i <interval_between_request>```. 
+- latency experiment client. We wrote a program for testing latency of the pipeline. You can run via  ```./latency_client -n <num_requests> -b <batch_size> -q <dataset_director> -i <interval_between_request> -e <emb_dim>```.  (interval is in us, default emb_dim is 1024) 
+
+e.g. ```./latency_client  -q perf_data/miniset -e 1024 -n <num_requests> -b <batch_size> -i <interval_between_request>```
+
+```./latency_client  -q perf_data/gist -e 960 -n <num_requests> -b <batch_size> -i <interval_between_request>```
 
 
-# Docker image
-We have built a docker image that have nvcc and cascade,derecho built and installed. You can pull from the docker image and run it on your environment.
+
+
+## Docker image
+We have built a docker image that have nvcc, cascade,derecho, FAISS built and installed. You can pull from the docker image and run it on your environment.
 
 Image name: yy354/rag_dev:v1.0

@@ -6,11 +6,12 @@ import pickle
 import sys
 import time
 import json
+import argparse
 from derecho.cascade.external_client import ServiceClientAPI
 
 
-NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250
-EMBEDDING_DIM = 1024
+
+NUM_EMB_PER_OBJ = 200  # < 1MB/4KB = 250 (suppose p2p message size is 1MB)
 NUM_KEY_PER_MAP_OBJ = 50000 # takes around 1MB memory
 FLOAT_POINT_SIZE = 32  # currently only support 32-bit float TODO: add support for 64-bit float
 
@@ -94,7 +95,7 @@ def break_into_chunks(num_embeddings, chunk_size):
     return chunk_idxs
 
     
-def put_initial_embeddings_docs(capi, basepath):
+def put_initial_embeddings_docs(capi, basepath, put_docs=True, embed_dim=1024):
     # 0. put answer mapping
     DOC_EMB_MAP = pickle.load(open(os.path.join(basepath, DOC_EMB_MAP_FILENAME), "rb"))
     print("Initializing: putting doc_emb map to cascade server ...")
@@ -114,7 +115,7 @@ def put_initial_embeddings_docs(capi, basepath):
                 exit(1)
         print(f"         Put cluster{cluster_id} doc_emb_map size: {len(table_dict)}")
     # 1. Put centroids'embeddings to cascade.
-    centroids_embs = get_embeddings(basepath, CENTROIDS_FILENAME, EMBEDDING_DIM)
+    centroids_embs = get_embeddings(basepath, CENTROIDS_FILENAME, embed_dim)
     centroids_chunk_idx = break_into_chunks(centroids_embs.shape[0], NUM_EMB_PER_OBJ)
     print(f"Initilizing: put {centroids_embs.shape[0]} centroids embeddings to cascade")
     for i, (start_idx, end_idx) in enumerate(centroids_chunk_idx):
@@ -127,12 +128,14 @@ def put_initial_embeddings_docs(capi, basepath):
             print(f"Failed to put the centroids embeddings to key: {key}")
             exit(1)
     print("Initializing: putting clusters' embeddings and docs to cascade server ...")
-    doc_list = pickle.load(open(os.path.join(basepath, DOC_LIST_FILENAME), "rb"))
+    
     # 2. Put clusters' embeddings and docs to cascade.
+    if put_docs:
+        doc_list = pickle.load(open(os.path.join(basepath, DOC_LIST_FILENAME), "rb"))
     centroid_count = centroids_embs.shape[0]
     cluster_file_name_list = [f'{CLUSTER_FILE_PREFIX}{count}.pkl' for count in range(centroid_count)]
     for cluster_id, cluster_file_name in enumerate(cluster_file_name_list):
-        cluster_embs = get_embeddings(basepath, cluster_file_name, EMBEDDING_DIM)
+        cluster_embs = get_embeddings(basepath, cluster_file_name, embed_dim)
         num_embeddings = cluster_embs.shape[0]
         cluster_chunk_idx = break_into_chunks(num_embeddings, NUM_EMB_PER_OBJ)
         for i, (start_idx, end_idx) in enumerate(cluster_chunk_idx):
@@ -145,17 +148,18 @@ def put_initial_embeddings_docs(capi, basepath):
                 print(f"Failed to put the cluster embeddings to key: {key}")
                 exit(1)
         # Put the corresponding docs to cascade
-        for emb_idx in range(num_embeddings):
-            doc_idx = DOC_EMB_MAP[cluster_id][emb_idx]
-            doc_key = f"/rag/doc/{doc_idx}"
-            doc = doc_list[doc_idx]
-            res = capi.put(doc_key, doc.encode('utf-8'))
-            if res:
-                res.get_result()
-            else:
-                print(f"Failed to put the doc to key: {doc_key}")
-                exit(1)
-        print(f"         Put cluster{cluster_id}, num {num_embeddings} emb+doc, {len(cluster_chunk_idx)} objs to cascade")
+        if put_docs:
+            for emb_idx in range(num_embeddings):
+                doc_idx = DOC_EMB_MAP[cluster_id][emb_idx]
+                doc_key = f"/rag/doc/{doc_idx}"
+                doc = doc_list[doc_idx]
+                res = capi.put(doc_key, doc.encode('utf-8'))
+                if res:
+                    res.get_result()
+                else:
+                    print(f"Failed to put the doc to key: {doc_key}")
+                    exit(1)
+        print(f"         Put cluster{cluster_id}, num {num_embeddings} embs, {len(cluster_chunk_idx)} objs to cascade")
     print(f"Initialized embeddings")
 
 
@@ -163,16 +167,30 @@ def put_initial_embeddings_docs(capi, basepath):
 
 
 def main(argv):
+    print("Connecting to Cascade service ...")   
+
+    parser = argparse.ArgumentParser(description="Set up and connect to the Cascade service.")
+    parser.add_argument('-p', '--path', required=True, type=str, help="Path to the data folder.")
+    parser.add_argument('-e', '--embed_dim', required=True, type=int, help="Dimension of embeddings.")
+    parser.add_argument('-doc', action='store_true', help="Include docs in the setup.")
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Access parsed arguments
+    data_dir = args.path
+    include_docs = args.doc
+    embed_dim = args.embed_dim
+
+    # Connect to Cascade service
     print("Connecting to Cascade service ...")
-    # get the datadir from the command line
-    if len(argv) < 2:
-        print("Usage: python3 perf_test_setup.py <path_to_data_folder>")
-        exit(1)
-    data_dir = argv[1]
     capi = ServiceClientAPI()
     create_object_pool(capi, script_dir)
-    put_initial_embeddings_docs(capi, data_dir)
+    put_initial_embeddings_docs(capi, data_dir, put_docs=include_docs, embed_dim=embed_dim)
     print("Done!")
+
+
+
 
 
 if __name__ == "__main__":
