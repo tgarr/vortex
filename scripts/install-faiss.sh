@@ -26,9 +26,8 @@ response=${response,,}
 
 if [[ "$response" == "y" ]]; then
     enable_python="ON"
-else
+elif [[ "$response" == "n" ]]; then
     enable_python="OFF"
-fi
 else
     echo "Invalid response. Please enter 'y' or 'n'."
 fi
