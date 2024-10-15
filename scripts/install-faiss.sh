@@ -20,8 +20,8 @@ else
     cudatoolkit_dir=$CUDAToolKitRoot
 fi
 
-# Python interface is currently not needed for vortex
-read -p "Install FAISS Python interface? (y/n): (optional, not needed for Vortex) " response
+# Python interface is currently not needed for vortex, but it is needed to buildthe GIST dataset with clusters. So need to install it on the server that handle the data processing
+read -p "Install FAISS Python interface? (y/n): " response
 response=${response,,}
 
 if [[ "$response" == "y" ]]; then
