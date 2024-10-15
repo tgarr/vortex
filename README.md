@@ -1,14 +1,15 @@
 # rag_demo
 
 ## Requirement
-1. FAISS : https://github.com/facebookresearch/faiss/blob/main/INSTALL.md 
+1. Derecho : https://github.com/Derecho-Project/derecho.git
+
+2. Cascade : https://github.com/Derecho-Project/cascade.git , with Cascade Python API installed (https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223/src/service/python )
+
+3. FAISS : https://github.com/facebookresearch/faiss/blob/main/INSTALL.md 
 
    NVIDIA toolkit nvcc if run with GPU support
 
    You can install it via the script in script/install-faiss.sh. (Note in current Vortex, we use FAISS cpp; FAISS python is not needed, and optional to install)
-
-2. cascade : https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223 , with Cascade Python API installed (https://github.com/Derecho-Project/cascade/tree/7647a5f7c55aaed9327b62bc6bac93e1cbfb1223/src/service/python )
-
 
 
 # Configuration
@@ -19,7 +20,7 @@ In cfg/dfgs.json.tmp we set the configuration of the UDLs and their dependencies
 # Run
 
 ## Server Commands
-In the main branch of this repo, we provide a bare-minimal setup of cascade server and client. It only requires two server nodes to start the service. n0, n1. run ``` ./run.sh server ``` under the build directory of the corresponding folder starts the service.
+In the main branch of this repo, we provide a bare-minimal setup of cascade server and client. It only requires two server nodes to start the service. n0, n1. run ``` cascade_server ``` under the build directory of the corresponding folder starts the service. (Need to build Cascade bin and set ENV Variable PATH correctly to include the directory where cascade_server is installed, ```export PATH=$PATH:${directory of cascade_server}```)
 
 
 ## Client Commands
