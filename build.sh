@@ -8,7 +8,7 @@ else
 fi
 
 if [ -z $VORTEX_INSTALL_PREFIX ]; then
-    install_prefix="/home/yy354/opt-dev"
+    install_prefix="/usr/local"
 else
     install_prefix=$VORTEX_INSTALL_PREFIX
 fi

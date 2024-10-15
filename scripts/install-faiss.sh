@@ -12,6 +12,7 @@ if [ -z $FAISS_INSTALL_PREFIX ]; then
 else
     install_prefix=$FAISS_INSTALL_PREFIX
 fi
+echo "FAISS library will be installed in $install_prefix"
 
 if [ -z $CUDAToolKitRoot ]; then
     cudatoolkit_dir="/usr/local/cuda-12.3"
@@ -62,9 +63,6 @@ if [[ "$response" == "y" ]]; then
     cd faiss/python
     python setup.py install --user
     cd ../../..
-else
-    echo "Faiss Python Installation skipped."
-    cd ..
 fi
 
 echo "FAISS installed successfully."
