@@ -255,7 +255,6 @@ public:
                parse_batch_id(key, client_id, query_batch_id); // Logging purpose
                TimestampLogger::log(LOG_BATCH_FAISS_SEARCH_START,client_id,query_batch_id,cluster_id);
                query_batch_infos.emplace_back(client_id, query_batch_id);
-               std::cout << "logged batch search start" << std::endl;
           }
 #endif
           search(nq, this->query_embs, top_k, *D, *I);
