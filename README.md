@@ -33,11 +33,11 @@ The object pools needed for this pipeline: /rag/emb, /rag/doc, /rag/generate. Th
 Construct the vector database by putting centroids and clusters' embeddings and documents.
 
 #### Vector database Data Storage formats
-- embeddings: stored in /rag/emb object pool
+- embeddings: stored in /rag/emb/* object pools
 
 centroids stored in the format of /rag/emb/centroids_obj/[obj_id], e.g. /rag/emb/centroids_obj/1, /rag/emb/centroids_obj/2
 
-cluster embeddings stored in the format of /rag/emb/cluster[cluster_id]/[obj_id], e.g. /rag/emb/cluster1/0, /rag/emb/cluster2/0
+cluster embeddings stored in the format of /rag/emb/clusters/cluster[cluster_id]/[obj_id], e.g. /rag/emb/clusters/cluster1/0, /rag/emb/clusters/cluster2/0
 
 Note that because we use these keys as identifier to the embeddings object, if accidentally put other objects with the same prefix put to Cascade, it could cause unexpected knn search result. 
 

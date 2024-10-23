@@ -139,7 +139,7 @@ def put_initial_embeddings_docs(capi, basepath, put_docs=True, embed_dim=1024):
         num_embeddings = cluster_embs.shape[0]
         cluster_chunk_idx = break_into_chunks(num_embeddings, NUM_EMB_PER_OBJ)
         for i, (start_idx, end_idx) in enumerate(cluster_chunk_idx):
-            key = f"/rag/emb/cluster{cluster_id}/{i}"
+            key = f"/rag/emb/clusters/cluster{cluster_id}/{i}"
             cluster_embs_chunk = cluster_embs[start_idx:end_idx]
             res = capi.put(key, cluster_embs_chunk.tobytes())
             if res:
