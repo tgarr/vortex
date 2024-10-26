@@ -19,7 +19,7 @@
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/gpu/StandardGpuResources.h>
 
-#include "rag_utils.hpp"
+#include "serialize_utils.hpp"
 
 #define MAX_NUM_QUERIES_PER_BATCH 100
 

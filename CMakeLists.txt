@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(spdlog 1.3.1 REQUIRED)
 find_package(derecho CONFIG REQUIRED)
@@ -46,7 +47,7 @@ set(LOG_TAG_QUERIES_SENDING_START 10000)
 set(LOG_TAG_QUERIES_SENDING_END 10001)
 set(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED 10100)
 
-add_executable(latency_client benchmark/vortex_client.cpp benchmark/latency_client.cpp vortex_udls/rag_utils.cpp)
+add_executable(latency_client benchmark/vortex_client.cpp benchmark/latency_client.cpp vortex_udls/serialize_utils.cpp)
 target_link_libraries(latency_client PRIVATE libwsong::perf derecho derecho::cascade pthread OpenSSL::Crypto)
 target_compile_definitions(latency_client PRIVATE
     LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
@@ -86,7 +87,7 @@ set(LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END 30041)
 set(LOG_CLUSTER_SEARCH_UDL_EMIT_START 30050)
 
 
-add_library(centroids_search_udl SHARED vortex_udls/centroids_search_udl.cpp vortex_udls/rag_utils.cpp)
+add_library(centroids_search_udl SHARED vortex_udls/centroids_search_udl.cpp vortex_udls/serialize_utils.cpp)
 target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS})
 target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_START}
@@ -107,7 +108,7 @@ target_compile_definitions(centroids_search_udl PRIVATE
 )
 
 
-add_library(clusters_search_udl SHARED vortex_udls/clusters_search_udl.cpp vortex_udls/rag_utils.cpp)
+add_library(clusters_search_udl SHARED vortex_udls/clusters_search_udl.cpp vortex_udls/serialize_utils.cpp)
 target_link_libraries(clusters_search_udl PRIVATE ${UDL_COMMON_LIBS})
 
 target_compile_definitions(clusters_search_udl PRIVATE
@@ -139,8 +140,11 @@ set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END 40021)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
 
-add_library(aggregate_generate_udl SHARED vortex_udls/aggregate_generate_udl.cpp vortex_udls/rag_utils.cpp)
-target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade)
+add_library(aggregate_generate_udl SHARED 
+            vortex_udls/aggregate_generate_udl.cpp 
+            vortex_udls/serialize_utils.cpp 
+            vortex_udls/api_utils.cpp)
+target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade CURL::libcurl)
 
 target_compile_definitions(aggregate_generate_udl PRIVATE
     LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
