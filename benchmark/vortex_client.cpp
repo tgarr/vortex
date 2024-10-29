@@ -236,7 +236,7 @@ bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,this->my_node_id,batch_id,j);
           }
 #endif
-          capi.put_and_forget(emb_query_obj, false); // not only trigger the UDL, but also update state. TODO: Need more thinking here. 
+          capi.trigger_put(emb_query_obj); // only trigger the UDL
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < this->batch_size; ++j) {
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,this->my_node_id,batch_id,j);

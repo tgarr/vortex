@@ -119,7 +119,7 @@ public:
                         parse_batch_id(obj.key, client_id, query_batch_id);
                         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,client_id,query_batch_id,cluster_id);
 #endif
-                        typed_ctxt->get_service_client_ref().put_and_forget(obj);
+                        typed_ctxt->get_service_client_ref().trigger_put(obj);
                     }
 
                     delete[] I;
