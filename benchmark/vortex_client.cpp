@@ -65,6 +65,10 @@ int VortexPerfClient::read_query_embs(std::string query_emb_directory, std::uniq
      return num_query_collected;
 }
 
+bool encode_queries_to_embeddings(std::vector<std::string>& queries, std::unique_ptr<float[]>& query_embs){
+     return false;
+}
+
 std::string VortexPerfClient::format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list) {
      // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
      uint32_t num_queries = static_cast<uint32_t>(nq);
@@ -81,7 +85,7 @@ std::string VortexPerfClient::format_query_emb_object(int nq, std::unique_ptr<fl
      return query_emb_string;
 }
 
-bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs,uint32_t& query_batch_id) {
+bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs, std::string& response, uint32_t& query_batch_id) {
      if (blob.size == 0) {
           std::cerr << "Error: empty result blob." << std::endl;
           return false;
@@ -91,14 +95,18 @@ bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_t
      std::string json_string(json_data, json_size);
      try{
           nlohmann::json parsed_json = nlohmann::json::parse(json_string);
-          if (parsed_json.count("query") == 0 || parsed_json.count("top_k_docs") == 0) {
-               std::cerr << "Result JSON does not contain query or top_k_docs." << std::endl;
+          if (parsed_json.count("query") == 0) {
+               std::cerr << "Result JSON does not contain query." << std::endl;
                return false;
           }
           query_text = parsed_json["query"];
-          top_k_docs = parsed_json["top_k_docs"];
           query_batch_id = parsed_json["query_batch_id"];
-
+          if (parsed_json.contains("top_k_docs")) {
+               top_k_docs = parsed_json["top_k_docs"];
+          }
+          if (parsed_json.contains("response")) {
+               response = parsed_json["response"];
+          }
      } catch (const nlohmann::json::parse_error& e) {
           std::cerr << "Result JSON parse error: " << e.what() << std::endl;
           return false;
@@ -119,8 +127,9 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
                [&](const Blob& result){
                     std::string query_text;
                     std::vector<std::string> top_k_docs;
+                    std::string llm_response;
                     uint32_t query_batch_id;
-                    if (!deserialize_result(result, query_text, top_k_docs, query_batch_id)) {
+                    if (!deserialize_result(result, query_text, top_k_docs, llm_response, query_batch_id)) {
                          std::cerr << "Error: failed to deserialize the result from the notification." << std::endl;
                          return false;
                     }
@@ -298,31 +307,36 @@ std::vector<std::vector<std::string>> VortexPerfClient::read_groundtruth(std::fi
 
 
 bool VortexPerfClient::compute_recall(ServiceClientAPI& capi, std::string& query_directory){
-     std::filesystem::path groundtruth_pathname = std::filesystem::path(query_directory) / GROUNDTRUTH_FILENAME;
-     std::vector<std::vector<std::string>> groundtruth = read_groundtruth(groundtruth_pathname);
-     double total_recall = 0.0;
-     // double recalls[this->num_queries];
-     for (const auto& [query, results] : this->query_results) {
-          uint query_index = stoi(query.substr(query.find_last_of(' ') + 1));
-          if (query_index >= groundtruth.size()) {
-               std::cerr << "Error: query index out of range." << std::endl;
-               return false;
-          }
-          uint topk = results.size();
-          uint found = 0;
-          const auto& query_grondtruth = groundtruth[query_index];
-          for (const auto& result : results) {
-               std::string doc_index = result.substr(result.find_last_of('/') + 1); // index are written as string
-               if (is_in_topk(query_grondtruth, doc_index, topk)) {
-                    found++;
+     try{
+          std::filesystem::path groundtruth_pathname = std::filesystem::path(query_directory) / GROUNDTRUTH_FILENAME;
+          std::vector<std::vector<std::string>> groundtruth = read_groundtruth(groundtruth_pathname);
+          double total_recall = 0.0;
+          // double recalls[this->num_queries];
+          for (const auto& [query, results] : this->query_results) {
+               uint query_index = stoi(query.substr(query.find_last_of(' ') + 1));
+               if (query_index >= groundtruth.size()) {
+                    std::cerr << "Error: query index out of range." << std::endl;
+                    return false;
                }
+               uint topk = results.size();
+               uint found = 0;
+               const auto& query_grondtruth = groundtruth[query_index];
+               for (const auto& result : results) {
+                    std::string doc_index = result.substr(result.find_last_of('/') + 1); // index are written as string
+                    if (is_in_topk(query_grondtruth, doc_index, topk)) {
+                         found++;
+                    }
+               }
+               total_recall += static_cast<double>(found) / topk;
+               // recalls[query_index] = static_cast<double>(found) / topk;
           }
-          total_recall += static_cast<double>(found) / topk;
-          // recalls[query_index] = static_cast<double>(found) / topk;
+          double avg_recall = total_recall / (this->num_queries*this->batch_size);
+          std::cout << "Avg Recall: " << avg_recall << std::endl;
+          std::cout << "------------------------" << std::endl;
+          // Could write out recalls to a file
+          return true;
+     } catch (const std::exception& e) {
+          std::cerr << "Error: failed to compute recall: " << e.what() << std::endl;
+          return false;
      }
-     double avg_recall = total_recall / (this->num_queries*this->batch_size);
-     std::cout << "Avg Recall: " << avg_recall << std::endl;
-     std::cout << "------------------------" << std::endl;
-     // Could write out recalls to a file
-     return true;
 }

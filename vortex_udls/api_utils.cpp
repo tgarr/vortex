@@ -98,6 +98,10 @@ std::string run_gpt4o_mini(const std::string &query, const std::vector<std::stri
     // Parse the response to extract only the assistant's message content
     try {
         auto json_response = nlohmann::json::parse(readBuffer);
+        if (json_response.contains("error")) {
+            std::cerr << "API error: " << json_response["error"]["message"] << std::endl;
+            return "Error: " + json_response["error"]["message"].get<std::string>();
+        }
         std::string answer = json_response["choices"][0]["message"]["content"];
         return answer;
     } catch (const std::exception &e) {

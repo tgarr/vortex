@@ -127,11 +127,15 @@ def put_initial_embeddings_docs(capi, basepath, put_docs=True, embed_dim=1024):
         else:
             print(f"Failed to put the centroids embeddings to key: {key}")
             exit(1)
-    print("Initializing: putting clusters' embeddings and docs to cascade server ...")
+    
     
     # 2. Put clusters' embeddings and docs to cascade.
     if put_docs:
         doc_list = pickle.load(open(os.path.join(basepath, DOC_LIST_FILENAME), "rb"))
+        print("Initializing: putting clusters' embeddings and docs to cascade server ...")
+    else:
+        print("Initializing: putting clusters' embeddings to cascade server ...")
+
     centroid_count = centroids_embs.shape[0]
     cluster_file_name_list = [f'{CLUSTER_FILE_PREFIX}{count}.pkl' for count in range(centroid_count)]
     for cluster_id, cluster_file_name in enumerate(cluster_file_name_list):
