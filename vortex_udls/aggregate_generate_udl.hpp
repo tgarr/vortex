@@ -20,8 +20,13 @@ namespace cascade {
 #define MY_UUID "11a3c123-3300-31ac-1866-0003ac330000"
 #define MY_DESC "UDL to aggregate the knn search results for each query from the clusters and run LLM with the query and its top_k closest docs."
 
-std::string get_uuid();
-std::string get_description();
+std::string get_uuid() {
+    return MY_UUID;
+}
+
+std::string get_description() {
+    return MY_DESC;
+}
 
 // struct DocIndex; // declared in serialize_utils.hpp
 
@@ -78,7 +83,7 @@ private:
     int top_k = 5; // final top K results to use for LLM
     int top_num_centroids = 4; // number of top K clusters need to wait to gather for each query
     int include_llm = false; // 0: not include, 1: include
-    std::string llm_api_key;
+    std::string openai_api_key;
     std::string llm_model_name = "gpt4o-mini";
     int retrieve_docs = true; // 0: not retrieve, 1: retrieve
     int my_id;
@@ -142,9 +147,22 @@ public:
 
 };
 
-void initialize(ICascadeContext* ctxt);
-std::shared_ptr<OffCriticalDataPathObserver> get_observer(ICascadeContext* ctxt, const nlohmann::json& config);
-void release(ICascadeContext* ctxt);
+std::shared_ptr<OffCriticalDataPathObserver> AggGenOCDPO::ocdpo_ptr;
+void initialize(ICascadeContext* ctxt) {
+    AggGenOCDPO::initialize();
+}
+
+std::shared_ptr<OffCriticalDataPathObserver> get_observer(ICascadeContext* ctxt, 
+                                                        const nlohmann::json& config) {
+    auto typed_ctxt = dynamic_cast<DefaultCascadeContextType*>(ctxt);
+    std::static_pointer_cast<AggGenOCDPO>(AggGenOCDPO::get())->set_config(typed_ctxt, config);
+    return AggGenOCDPO::get();
+}
+
+void release(ICascadeContext* ctxt) {
+    // cleanup code if needed
+    return;
+}
 
 }  // namespace cascade
 }  // namespace derecho

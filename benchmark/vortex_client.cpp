@@ -1,7 +1,10 @@
 #include "vortex_client.hpp"
 
-VortexPerfClient::VortexPerfClient(int node_id, int num_queries, int batch_size, int query_interval, int emb_dim): 
-               my_node_id(node_id), num_queries(num_queries), batch_size(batch_size), query_interval(query_interval), embedding_dim(emb_dim) {
+VortexPerfClient::VortexPerfClient(int node_id, int num_queries, int batch_size, 
+                                   int query_interval, int emb_dim, bool only_send_query_text): 
+                                   my_node_id(node_id), num_queries(num_queries), 
+                                   batch_size(batch_size), query_interval(query_interval), 
+                                   embedding_dim(emb_dim), only_send_query_text(only_send_query_text) {
      this->running.store(true);
      this->num_queries_to_send.store(this->num_queries*this->batch_size);
 }
@@ -65,25 +68,38 @@ int VortexPerfClient::read_query_embs(std::string query_emb_directory, std::uniq
      return num_query_collected;
 }
 
-bool encode_queries_to_embeddings(std::vector<std::string>& queries, std::unique_ptr<float[]>& query_embs){
-     return false;
+/** TODO: quite some copies in this process, not on critical path, but could be optimized. */
+bool VortexPerfClient::prepare_queries(const std::string& query_directory, std::vector<std::string>& queries, std::unique_ptr<float[]>& query_embs){
+     std::filesystem::path query_pathname = std::filesystem::path(query_directory) / QUERY_FILENAME;
+     int num_query_collected = read_queries(query_pathname, queries);
+     if (queries.size() == 0) {
+          std::cerr << "Error: failed to read queries from " << query_directory << std::endl;
+          return false;
+     }
+
+     if (this->only_send_query_text) {
+          return true;
+     }
+     std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
+     int num_emb_collected = read_query_embs(query_emb_pathname, query_embs);
+     // resize query or query_embs to make sure they correspond, i.e. have the same number of queries
+     if (num_query_collected > num_emb_collected){ // truncate query_vector to match the number of query embeddings
+          queries.resize(num_query_collected);
+          num_query_collected = num_emb_collected;
+     } else if (num_emb_collected > num_query_collected) { // truncate query_embs to match the number of queries
+          std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(this->embedding_dim * num_query_collected);
+          std::memcpy(new_embs.get(), query_embs.get(), this->embedding_dim * num_emb_collected * sizeof(float));
+          query_embs = std::move(new_embs);
+          num_emb_collected = num_query_collected;
+     }
+     if (num_query_collected < this->batch_size){
+          std::cerr << "Error: total number of queries in the dataset are not large enough for the batch size." << std::endl;
+          return false;
+     }
+     return true;
 }
 
-std::string VortexPerfClient::format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list) {
-     // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
-     uint32_t num_queries = static_cast<uint32_t>(nq);
-     std::string nq_bytes(4, '\0');
-     nq_bytes[0] = (num_queries >> 24) & 0xFF;
-     nq_bytes[1] = (num_queries >> 16) & 0xFF;
-     nq_bytes[2] = (num_queries >> 8) & 0xFF;
-     nq_bytes[3] = num_queries & 0xFF;
-     float* query_embeddings = xq.get();
-     // serialize the query embeddings and query texts, formated as num_queries + query_embeddings + query_texts
-     std::string query_emb_string = nq_bytes +
-                              std::string(reinterpret_cast<const char*>(query_embeddings), sizeof(float) * this->embedding_dim * num_queries) +
-                              nlohmann::json(query_list).dump();
-     return query_emb_string;
-}
+
 
 bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs, std::string& response, uint32_t& query_batch_id) {
      if (blob.size == 0) {
@@ -181,44 +197,16 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
      return num_shards;
 }
 
-bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_directory){
-     // 1. Prepare the query and query embeddings
-     /** TODO: quite some copies in this process, not on critical path, but could be optimized. */
-     std::filesystem::path query_pathname = std::filesystem::path(query_directory) / QUERY_FILENAME;
-     std::vector<std::string> queries;
-     int num_query_collected = read_queries(query_pathname, queries);
-     if (queries.size() == 0) {
-          std::cerr << "Error: failed to read queries from " << query_directory << std::endl;
-          return false;
-     }
-
-     std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
-     std::unique_ptr<float[]> query_embs;
-     int num_emb_collected = read_query_embs(query_emb_pathname, query_embs);
-     // resize query or query_embs to make sure they correspond, i.e. have the same number of queries
-     if (num_query_collected > num_emb_collected){ // truncate query_vector to match the number of query embeddings
-          queries.resize(num_query_collected);
-          num_query_collected = num_emb_collected;
-     } else if (num_emb_collected > num_query_collected) { // truncate query_embs to match the number of queries
-          std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(this->embedding_dim * num_query_collected);
-          std::memcpy(new_embs.get(), query_embs.get(), this->embedding_dim * num_emb_collected * sizeof(float));
-          query_embs = std::move(new_embs);
-          num_emb_collected = num_query_collected;
-     }
-     if (num_query_collected < this->batch_size){
-          std::cerr << "Error: total number of queries in the dataset are not large enough for the batch size." << std::endl;
-          return false;
-     }
-
-     // 2. send the queries to the cascade
+bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi,const std::vector<std::string>& queries, const std::unique_ptr<float[]>& query_embs){
+     // 1. send the queries to the cascade
      for (int batch_id = 0; batch_id < this->num_queries; batch_id++) {
           std::string key = "/rag/emb/centroids_search/client" + std::to_string(this->my_node_id) + "/qb" + std::to_string(batch_id);
-          // 2.1. Prepare the query texts
+          // 1.1. Prepare the query texts
           std::vector<std::string> cur_query_list;
           std::vector<int> cur_query_ids;
           int qb_start_loc = batch_id * this->batch_size;
           for (int j = 0; j < this->batch_size; ++j) {
-               int pos = (qb_start_loc + j) % num_query_collected;
+               int pos = (qb_start_loc + j) % (queries.size());
               cur_query_list.push_back(queries[pos]);
               cur_query_ids.push_back(pos);
               if (this->sent_queries.find(queries[pos]) == this->sent_queries.end()) {
@@ -226,20 +214,26 @@ bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_
               }
               this->sent_queries[queries[pos]].push_back(std::make_tuple((uint32_t)batch_id, (uint32_t)j));
           }
-          // 2.2. Prepare query embeddings
-          std::unique_ptr<float[]> query_embeddings(new float[this->embedding_dim * this->batch_size]);
-          for (int j = 0; j < this->batch_size; ++j) {
-               int pos = (qb_start_loc + j) % num_emb_collected;
-               for (int k = 0; k < this->embedding_dim; ++k) {
-                    query_embeddings[j * this->embedding_dim + k] = query_embs[pos * this->embedding_dim + k];
+          std::string emb_query_string;
+          // 1.2. Prepare query object
+          if (this->only_send_query_text){
+               nlohmann::json query_texts_json(cur_query_list);
+               emb_query_string = query_texts_json.dump();
+          } else {
+               std::unique_ptr<float[]> query_embeddings(new float[this->embedding_dim * this->batch_size]);
+               for (int j = 0; j < this->batch_size; ++j) {
+                    int pos = (qb_start_loc + j) % (queries.size());
+                    for (int k = 0; k < this->embedding_dim; ++k) {
+                         query_embeddings[j * this->embedding_dim + k] = query_embs[pos * this->embedding_dim + k];
+                    }
                }
+               // 1.3. format the query 
+               emb_query_string = format_query_emb_object(this->batch_size, query_embeddings, cur_query_list, this->embedding_dim);
           }
-          // 2.3. format the query 
-          std::string emb_query_string = format_query_emb_object(this->batch_size, query_embeddings, cur_query_list);
           ObjectWithStringKey emb_query_obj;
           emb_query_obj.key = key;
           emb_query_obj.blob = Blob(reinterpret_cast<const uint8_t*>(emb_query_string.c_str()), emb_query_string.size());
-          // 2.4. send the object to the cascade
+          // 1.4. send the object to the cascade
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < this->batch_size; ++j) {
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,this->my_node_id,batch_id,j);
@@ -259,6 +253,8 @@ bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_
      }
      
      std::cout << "Put all queries to cascade." << std::endl;
+
+     // 2. wait for all results to be received
      while (this->running.load()) {
           std::this_thread::sleep_for(std::chrono::microseconds(this->query_interval/100));
      }

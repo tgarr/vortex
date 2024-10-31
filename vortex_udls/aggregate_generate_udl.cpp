@@ -3,15 +3,6 @@
 namespace derecho {
 namespace cascade {
 
-std::shared_ptr<OffCriticalDataPathObserver> AggGenOCDPO::ocdpo_ptr;
-
-std::string get_uuid() {
-    return MY_UUID;
-}
-
-std::string get_description() {
-    return MY_DESC;
-}
 
 QuerySearchResults::QuerySearchResults(const std::string& query_text, int total_cluster_num, int top_k) 
     : query_text(query_text), total_cluster_num(total_cluster_num), top_k(top_k) {}
@@ -62,7 +53,7 @@ void AggGenOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, const nlohma
         if (config.contains("final_top_k")) this->top_k = config["final_top_k"].get<int>();
         if (config.contains("include_llm")) this->include_llm = config["include_llm"].get<bool>();
         if (config.contains("retrieve_docs")) this->retrieve_docs = config["retrieve_docs"].get<bool>();
-        if (config.contains("llm_api_key")) this->llm_api_key = config["llm_api_key"].get<std::string>();
+        if (config.contains("openai_api_key")) this->openai_api_key = config["openai_api_key"].get<std::string>();
         if (config.contains("llm_model_name")) this->llm_model_name = config["llm_model_name"].get<std::string>();
     } catch (const std::exception& e) {
         std::cerr << "Error: failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config" << std::endl;
@@ -236,7 +227,7 @@ bool AggGenOCDPO::get_topk_docs(DefaultCascadeContextType* typed_ctxt, std::stri
 
 void AggGenOCDPO::async_run_llm_with_top_k_docs(const std::string& query_text) {
     auto& top_k_docs = query_results[query_text]->top_k_docs;
-    auto& api_key = this->llm_api_key;
+    auto& api_key = this->openai_api_key;
     auto& model = this->llm_model_name;
     
     query_api_futures[query_text] = std::async(std::launch::async, api_utils::run_gpt4o_mini, query_text, top_k_docs, model, api_key);
@@ -413,21 +404,7 @@ cleanup:
     map_cv.notify_one();
 }
 
-void initialize(ICascadeContext* ctxt) {
-    AggGenOCDPO::initialize();
-}
 
-std::shared_ptr<OffCriticalDataPathObserver> get_observer(ICascadeContext* ctxt, 
-                                                        const nlohmann::json& config) {
-    auto typed_ctxt = dynamic_cast<DefaultCascadeContextType*>(ctxt);
-    std::static_pointer_cast<AggGenOCDPO>(AggGenOCDPO::get())->set_config(typed_ctxt, config);
-    return AggGenOCDPO::get();
-}
-
-void release(ICascadeContext* ctxt) {
-    // cleanup code if needed
-    return;
-}
 
 }  // namespace cascade
-}  //
+}  // namespace derecho

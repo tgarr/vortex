@@ -66,8 +66,8 @@ set(LOG_BATCH_FAISS_SEARCH_SIZE 30032)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_START 20000)
 set(LOG_CENTROIDS_EMBEDDINGS_LOADING_START 20010)
 set(LOG_CENTROIDS_EMBEDDINGS_LOADING_END 20011)
-set(LOG_CENTROIDS_SEARCH_DESERIALIZE_START 20020)
-set(LOG_CENTROIDS_SEARCH_DESERIALIZE_END 20021)
+set(LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_START 20020)
+set(LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_END 20021)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START 20030)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END 20031)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END 20041)
@@ -87,14 +87,18 @@ set(LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END 30041)
 set(LOG_CLUSTER_SEARCH_UDL_EMIT_START 30050)
 
 
-add_library(centroids_search_udl SHARED vortex_udls/centroids_search_udl.cpp vortex_udls/serialize_utils.cpp)
-target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS})
+add_library(centroids_search_udl SHARED
+                            vortex_udls/centroids_search_udl.hpp 
+                            vortex_udls/centroids_search_udl.cpp 
+                            vortex_udls/serialize_utils.cpp 
+                            vortex_udls/api_utils.cpp)
+target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS} CURL::libcurl)
 target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_START=${LOG_CENTROIDS_EMBEDDINGS_LOADING_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_END=${LOG_CENTROIDS_EMBEDDINGS_LOADING_END}
-    LOG_CENTROIDS_SEARCH_DESERIALIZE_START=${LOG_CENTROIDS_SEARCH_DESERIALIZE_START}
-    LOG_CENTROIDS_SEARCH_DESERIALIZE_END=${LOG_CENTROIDS_SEARCH_DESERIALIZE_END}
+    LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_START=${LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_START}
+    LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_END=${LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START}
     LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END}
@@ -108,7 +112,9 @@ target_compile_definitions(centroids_search_udl PRIVATE
 )
 
 
-add_library(clusters_search_udl SHARED vortex_udls/clusters_search_udl.cpp vortex_udls/serialize_utils.cpp)
+add_library(clusters_search_udl SHARED 
+                                vortex_udls/clusters_search_udl.cpp 
+                                vortex_udls/serialize_utils.cpp)
 target_link_libraries(clusters_search_udl PRIVATE ${UDL_COMMON_LIBS})
 
 target_compile_definitions(clusters_search_udl PRIVATE
@@ -141,6 +147,7 @@ set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
 
 add_library(aggregate_generate_udl SHARED 
+            vortex_udls/aggregate_generate_udl.hpp 
             vortex_udls/aggregate_generate_udl.cpp 
             vortex_udls/serialize_utils.cpp 
             vortex_udls/api_utils.cpp)

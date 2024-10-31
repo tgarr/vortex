@@ -6,6 +6,22 @@
 #include "serialize_utils.hpp"
 #include <cascade/service_client_api.hpp>
 
+std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list, uint32_t embedding_dim) {
+     // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
+     uint32_t num_queries = static_cast<uint32_t>(nq);
+     std::string nq_bytes(4, '\0');
+     nq_bytes[0] = (num_queries >> 24) & 0xFF;
+     nq_bytes[1] = (num_queries >> 16) & 0xFF;
+     nq_bytes[2] = (num_queries >> 8) & 0xFF;
+     nq_bytes[3] = num_queries & 0xFF;
+     float* query_embeddings = xq.get();
+     // serialize the query embeddings and query texts, formated as num_queries + query_embeddings + query_texts
+     std::string query_emb_string = nq_bytes +
+                              std::string(reinterpret_cast<const char*>(query_embeddings), sizeof(float) * embedding_dim * num_queries) +
+                              nlohmann::json(query_list).dump();
+     return query_emb_string;
+}
+
 /***
 * Helper function for logging purpose, to extract the query information from the key
 * @param key_string the key string to extract the query information from
