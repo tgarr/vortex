@@ -79,7 +79,6 @@ bool get_batch_embeddings(const std::vector<std::string> &queries,
         } catch (const std::exception &e) {
             std::cerr << "Exception occurred: " << e.what() << std::endl;
             success = false;
-            std::cerr << "Raw response: " << readBuffer << std::endl;
         }
 
         // Cleanup
@@ -132,6 +131,7 @@ std::string run_gpt4o_mini(const std::string &query, const std::vector<std::stri
         curl_easy_cleanup(curl);
         curl_slist_free_all(headers);
     }
+    std::cout << "Response: " << readBuffer << std::endl;
 
     // Parse the response to extract only the assistant's message content
     try {
