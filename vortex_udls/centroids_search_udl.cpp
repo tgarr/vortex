@@ -29,9 +29,6 @@ bool CentroidsSearchOCDPO::get_queries_and_emebddings(const ObjectWithStringKey&
             nq = query_list.size();
             data = new float[this->emb_dim * nq];
             // compute the embeddings via open AI API call
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-        TimestampLogger::log(LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_START,client_id,query_batch_id,this->my_id);
-#endif
             if (!api_utils::get_batch_embeddings(query_list, this->encoder_name, this->openai_api_key, this->emb_dim, data)) {
                 std::cerr << "Error: failed to get the embeddings from the query texts via OpenAI API." << std::endl;
                 dbg_default_error("{}, Failed to get the embeddings from the query texts via OpenAI API.", __func__);
@@ -39,9 +36,6 @@ bool CentroidsSearchOCDPO::get_queries_and_emebddings(const ObjectWithStringKey&
                 data = nullptr;
                 return false;
             }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING 
-        TimestampLogger::log(LOG_CENTROIDS_SEARCH_COMPUTE_EMBEDDINGS_END,client_id,query_batch_id,this->my_id);
-#endif
         } catch (const std::exception& e) {
             std::cerr << "Error: failed to compute the embeddings from the query texts." << std::endl;
             dbg_default_error("{}, Failed to compute the embeddings from the query texts.", __func__);
@@ -106,6 +100,9 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
     }
 
     // 1. get the query embeddings from the object
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+        TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START,client_id,query_batch_id,this->my_id);
+#endif
     float* data;
     uint32_t nq;
     std::vector<std::string> query_list;
@@ -113,6 +110,9 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("Failed to get the query, embeddings from the object, at centroids_search_udl.");
         return;
     }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING 
+        TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END,client_id,query_batch_id,this->my_id);
+#endif
 
     // 2. search the top_num_centroids that are close to the query
     long* I = new long[this->top_num_centroids * nq];

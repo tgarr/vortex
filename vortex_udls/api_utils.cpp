@@ -79,6 +79,7 @@ bool get_batch_embeddings(const std::vector<std::string> &queries,
         } catch (const std::exception &e) {
             std::cerr << "Exception occurred: " << e.what() << std::endl;
             success = false;
+            std::cerr << "Raw response: " << readBuffer << std::endl;
         }
 
         // Cleanup

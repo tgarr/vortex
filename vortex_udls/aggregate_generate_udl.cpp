@@ -356,8 +356,6 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
         *  But UDL2 doesn't have caching and unaware of the same query, so it would recomputes KNN for the same query embedding and
         *  then trigger this UDL multiple time even after we send back the result to the client already. 
         *  This is to avoid sending the same result to the client multiple times.
-        * TODO: need to also acquire lock here, because garbage collector also access this and query_request_tracker
-        *   1 solution is to move locks from async_run_llm_with_top_k_docs to here.
     */
     if (query_results.find(query_text) == query_results.end()) {
         query_results[query_text] = std::make_unique<QuerySearchResults>(query_text, top_num_centroids, top_k);
