@@ -174,7 +174,8 @@ target_compile_definitions(aggregate_generate_udl PRIVATE
 add_custom_command(TARGET aggregate_generate_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/perf_data
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/perf_data
         ${CMAKE_CURRENT_BINARY_DIR}/perf_data
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/setup
         ${CMAKE_CURRENT_BINARY_DIR}/setup
