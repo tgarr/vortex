@@ -92,60 +92,77 @@ bool get_batch_embeddings(const std::vector<std::string> &queries,
 }
 
 // Function to run GPT model with query and top documents
-std::string run_gpt4o_mini(const std::string &query, const std::vector<std::string> &top_docs, const std::string &model, const std::string &api_key) {
+std::string run_gpt4o_mini(const std::string &query, const std::vector<std::string> &top_docs, const std::string &model, const std::string &api_key, int max_retries = 3) {
     CURL *curl;
     CURLcode res;
     std::string readBuffer;
 
-    curl = curl_easy_init();
-    if (curl) {
-        // Combine the query and top documents into a single conversation-like input
-        std::string prompt = query + "\nTop documents:\n";
-        for (const auto& doc : top_docs) {
-            prompt += "- " + doc + "\n";
+    int attempt = 0;
+    while (attempt < max_retries) {
+        readBuffer.clear();
+        curl = curl_easy_init();
+        if (curl) {
+            // Combine the query and top documents into a single conversation-like input
+            std::string prompt = query + "\nTop documents:\n";
+            for (const auto& doc : top_docs) {
+                prompt += "- " + doc + "\n";
+            }
+
+            nlohmann::json payload = {
+                {"model", model},
+                {"messages", {
+                    {{"role", "system"}, {"content", "You are a helpful assistant."}},
+                    {{"role", "user"}, {"content", prompt}}
+                }}
+            };
+
+            std::string url = "https://api.openai.com/v1/chat/completions";
+            std::string postData = payload.dump();
+
+            struct curl_slist *headers = nullptr;
+            headers = curl_slist_append(headers, ("Authorization: Bearer " + api_key).c_str());
+            headers = curl_slist_append(headers, "Content-Type: application/json");
+
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.c_str());
+            curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+            // Set timeouts
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+
+            res = curl_easy_perform(curl);
+            curl_easy_cleanup(curl);
+            curl_slist_free_all(headers);
+
+            if (res == CURLE_OK) {
+                try {
+                    auto json_response = nlohmann::json::parse(readBuffer);
+                    if (json_response.contains("error")) {
+                        std::cerr << "API error: " << json_response["error"]["message"] << std::endl;
+                        return "Error: " + json_response["error"]["message"].get<std::string>();
+                    }
+                    std::string answer = json_response["choices"][0]["message"]["content"];
+                    return answer;
+                } catch (const std::exception &e) {
+                    std::cerr << "Error parsing JSON response: " << e.what() << std::endl;
+                }
+            } else {
+                std::cerr << "CURL error: " << curl_easy_strerror(res) << std::endl;
+            }
+        } else {
+            return "Error: Failed to initialize CURL.";
         }
 
-        // Use the chat/completions endpoint with properly formatted messages
-        nlohmann::json payload = {
-            {"model", model},
-            {"messages", {
-                {{"role", "system"}, {"content", "You are a helpful assistant."}},
-                {{"role", "user"}, {"content", prompt}}
-            }}
-        };
-
-        std::string url = "https://api.openai.com/v1/chat/completions";
-        std::string postData = payload.dump();
-
-        struct curl_slist *headers = nullptr;
-        headers = curl_slist_append(headers, ("Authorization: Bearer " + api_key).c_str());
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-
-        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postData.c_str());
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-
-        res = curl_easy_perform(curl);
-        curl_easy_cleanup(curl);
-        curl_slist_free_all(headers);
+        // Retry with exponential backoff
+        attempt++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10 * (1 << attempt))); // Exponential backoff
+        std::cout << "Retrying API call..." << std::endl;
     }
-    std::cout << "Response: " << readBuffer << std::endl;
 
-    // Parse the response to extract only the assistant's message content
-    try {
-        auto json_response = nlohmann::json::parse(readBuffer);
-        if (json_response.contains("error")) {
-            std::cerr << "API error: " << json_response["error"]["message"] << std::endl;
-            return "Error: " + json_response["error"]["message"].get<std::string>();
-        }
-        std::string answer = json_response["choices"][0]["message"]["content"];
-        return answer;
-    } catch (const std::exception &e) {
-        std::cerr << "Error parsing JSON response: " << e.what() << std::endl;
-        return "Error: Unable to parse response.";
-    }
+    return "Error: Exceeded maximum retry attempts.";
 }
 
 
