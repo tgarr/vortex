@@ -396,6 +396,9 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
     // 6. put the result to cascade and notify the client
         process_result_and_notify_clients(typed_ctxt, query_text);
     }
+#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+    TimestampLogger::log(LOG_TAG_AGG_UDL_END, client_id, query_batch_id, qid);
+#endif
 cleanup:
     new_request = false;
     lock.unlock();
