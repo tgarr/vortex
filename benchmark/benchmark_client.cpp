@@ -8,14 +8,20 @@ VortexBenchmarkClient::~VortexBenchmarkClient(){
     client_thread->signal_stop();
     client_thread->join();
 
-    notification_thread->signal_stop();
-    notification_thread->join();
+    for(auto &t : notification_threads){
+        t.signal_stop();
+    }
+    
+    for(auto &t : notification_threads){
+        t.join();
+    }
 
     // TODO print batching statistics
 }
 
-void VortexBenchmarkClient::setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim){
+void VortexBenchmarkClient::setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim,uint64_t num_result_threads){
     this->emb_dim = emb_dim;
+    this->num_result_threads = num_result_threads;
 
     // Prepare for the notification by creating object pool for results to store
     std::string result_pool_name = "/rag/results/" + std::to_string(this->my_id);
@@ -29,7 +35,8 @@ void VortexBenchmarkClient::setup(uint64_t batch_min_size,uint64_t batch_max_siz
     std::cout << "  registering notification handler ... " << result_pool_name << std::endl;
     bool ret = capi.register_notification_handler(
             [&](const Blob& result){
-                notification_thread->push_result(result);
+                notification_threads[next_thread].push_result(result);
+                next_thread = (next_thread + 1) % this->num_result_threads;
                 return true;
             }, result_pool_name);
 
@@ -52,9 +59,14 @@ void VortexBenchmarkClient::setup(uint64_t batch_min_size,uint64_t batch_max_siz
         i++;
     }
 
-    // start notification thread
-    notification_thread = new NotificationThread(this);
-    notification_thread->start();
+    // start notification threads
+    for(uint64_t i=0;i<num_result_threads;i++){
+        notification_threads.emplace_back(this);
+    }
+
+    for(auto &t : notification_threads){
+        t.start();
+    }
 
     // start client thread
     client_thread = new ClientThread(batch_min_size,batch_max_size,batch_time_us,emb_dim);
@@ -100,17 +112,24 @@ void VortexBenchmarkClient::dump_timestamps(){
 void VortexBenchmarkClient::result_received(nlohmann::json &result_json){
     uint32_t batch_id = (int)result_json["query_batch_id"] / QUERY_BATCH_ID_MODULUS; // TODO this is weird: we should use a global unique identifier for each individual query
     std::string query_text(std::move(result_json["query"]));
+
+    std::shared_lock<std::shared_mutex> lock(client_thread->map_mutex);
     auto index_and_id = client_thread->batched_query_to_index_and_id[batch_id][query_text];
+    lock.unlock();
+
     uint64_t query_index = index_and_id.first;
     query_id_t query_id = index_and_id.second;
 
+    std::unique_lock<std::shared_mutex> lock2(result_mutex);
     result.emplace(query_id,std::move(result_json["top_k_docs"]));
+    lock2.unlock();
     
     TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,batch_id,query_index);
     result_count++;
 }
 
 const std::vector<std::string>& VortexBenchmarkClient::get_result(query_id_t query_id){
+    std::shared_lock<std::shared_mutex> lock(result_mutex);
     return result[query_id];
 }
 
@@ -206,6 +225,7 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
             for(uint64_t i=0;i<send_count;i++){
                 auto query_id = std::get<0>(to_send[i]);
                 // TODO this is inefficient: we should use just query_id (but this requires chaning the UDLs to carry query_id around)
+                std::unique_lock<std::shared_mutex> lock(map_mutex);
                 batched_query_to_index_and_id[batch_id][*std::get<1>(to_send[i])] = std::make_pair(i,query_id);
                 TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,node_id,batch_id,i);
             }

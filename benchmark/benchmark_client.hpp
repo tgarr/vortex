@@ -11,6 +11,7 @@
 #include <tuple>
 #include <atomic>
 #include <unordered_map>
+#include <shared_mutex>
 #include "../vortex_udls/rag_utils.hpp"
 
 using namespace derecho::cascade;
@@ -61,6 +62,7 @@ class VortexBenchmarkClient {
 
         // TODO this is inefficient: we should use a global identifier (query_id_t) for each query and send it through the pipeline, so it's easy to identify them later when the results come back
         std::unordered_map<uint32_t,std::unordered_map<std::string,std::pair<uint64_t,query_id_t>>> batched_query_to_index_and_id;
+        std::shared_mutex map_mutex;
 
         inline void start(){
             running = true;
@@ -105,15 +107,17 @@ class VortexBenchmarkClient {
     ServiceClientAPI& capi = ServiceClientAPI::get_service_client();
     uint64_t my_id = capi.get_my_id();
     ClientThread *client_thread;
-    NotificationThread *notification_thread;
+    std::deque<NotificationThread> notification_threads;
     uint64_t emb_dim = 1024;
+    uint64_t num_result_threads = 1;
+    uint64_t next_thread = 0;
 
     std::mutex query_id_mtx;
     uint64_t query_count = 0;
     query_id_t next_query_id();
 
     std::atomic<uint64_t> result_count = 0;
-
+    std::shared_mutex result_mutex;
     std::unordered_map<query_id_t,std::vector<std::string>> result;
     void result_received(nlohmann::json &result_json);
 
@@ -122,7 +126,7 @@ class VortexBenchmarkClient {
     VortexBenchmarkClient();
     ~VortexBenchmarkClient();
     
-    void setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim);
+    void setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim,uint64_t num_result_threads);
    
     uint64_t query(const std::string& query,const float* query_emb);
     void wait_results();

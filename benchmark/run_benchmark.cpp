@@ -11,17 +11,19 @@
 #define DEFAULT_BATCH_TIME_US 500
 #define DEFAULT_DIMENSIONS 1024
 #define DEFAULT_NUM_QUERIES 10
+#define DEFAULT_NUM_RESULT_THREADS 1
 
 void print_help(const std::string& bin_name){
     std::cout << "usage: " << bin_name << " [options] <dataset_dir>" << std::endl;
     std::cout << "options:" << std::endl;
-    std::cout << " -n <num_queries>\ttotal number of queries to send (default: " << DEFAULT_NUM_QUERIES << ")" << std::endl;
-    std::cout << " -e <emb_dim>\t\tembeddings dimensions (default: " << DEFAULT_DIMENSIONS << ")" << std::endl;
-    std::cout << " -r <send_rate>\t\trate (in queries/second) at which to send queries (default: unlimited)" << std::endl;
-    std::cout << " -b <batch_min_size>\tminimum batch size (default: " << DEFAULT_BATCH_MIN_SIZE << ")" << std::endl;
-    std::cout << " -x <batch_max_size>\tmaximum batch size (default: " << DEFAULT_BATCH_MAX_SIZE << ")" << std::endl;
-    std::cout << " -u <batch_time_us>\tmaximum time to wait for the batch minimum size, in microseconds (default: " << DEFAULT_BATCH_TIME_US << ")" << std::endl;
-    std::cout << " -h\t\t\tshow this help" << std::endl;
+    std::cout << " -n <num_queries>\t\ttotal number of queries to send (default: " << DEFAULT_NUM_QUERIES << ")" << std::endl;
+    std::cout << " -e <emb_dim>\t\t\tembeddings dimensions (default: " << DEFAULT_DIMENSIONS << ")" << std::endl;
+    std::cout << " -r <send_rate>\t\t\trate (in queries/second) at which to send queries (default: unlimited)" << std::endl;
+    std::cout << " -b <batch_min_size>\t\tminimum batch size (default: " << DEFAULT_BATCH_MIN_SIZE << ")" << std::endl;
+    std::cout << " -x <batch_max_size>\t\tmaximum batch size (default: " << DEFAULT_BATCH_MAX_SIZE << ")" << std::endl;
+    std::cout << " -u <batch_time_us>\t\tmaximum time to wait for the batch minimum size, in microseconds (default: " << DEFAULT_BATCH_TIME_US << ")" << std::endl;
+    std::cout << " -t <num_result_threads>\tnumber of threads for processing results (default: " << DEFAULT_NUM_RESULT_THREADS << ")" << std::endl;
+    std::cout << " -h\t\t\t\tshow this help" << std::endl;
 }
 
 int main(int argc, char** argv){
@@ -33,8 +35,9 @@ int main(int argc, char** argv){
     uint64_t batch_time_us = DEFAULT_BATCH_TIME_US;
     uint64_t num_queries = DEFAULT_NUM_QUERIES;
     uint64_t emb_dim = DEFAULT_DIMENSIONS;
+    uint64_t num_result_threads = DEFAULT_NUM_RESULT_THREADS;
 
-    while ((c = getopt(argc, argv, "n:e:r:b:x:u:h")) != -1){
+    while ((c = getopt(argc, argv, "n:e:r:b:x:u:t:h")) != -1){
         switch(c){
             case 'n':
                 num_queries = strtoul(optarg,NULL,10);
@@ -53,6 +56,9 @@ int main(int argc, char** argv){
                 break;
             case 'u':
                 batch_time_us = strtoul(optarg,NULL,10);
+                break;
+            case 't':
+                num_result_threads = strtoul(optarg,NULL,10);
                 break;
             case '?':
             case 'h':
@@ -81,6 +87,7 @@ int main(int argc, char** argv){
     std::cout << "  batch_min_size = " << batch_min_size << std::endl;
     std::cout << "  batch_max_size = " << batch_max_size << std::endl;
     std::cout << "  batch_time_us = " << batch_time_us << std::endl;
+    std::cout << "  num_result_threads = " << num_result_threads << std::endl;
     std::cout << "  dataset_dir = " << dataset_dir << std::endl;
 
     VortexBenchmarkDataset dataset(dataset_dir,num_queries,emb_dim);
@@ -88,7 +95,7 @@ int main(int argc, char** argv){
 
     // setup
     std::cout << "setting up client ..." << std::endl;
-    vortex.setup(batch_min_size,batch_max_size,batch_time_us,emb_dim);
+    vortex.setup(batch_min_size,batch_max_size,batch_time_us,emb_dim,num_result_threads);
 
     // send queries
     std::cout << "sending " << num_queries << " queries ..." << std::endl;
