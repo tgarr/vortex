@@ -1,0 +1,36 @@
+#pragma once
+
+#include <string>
+#include <vector>
+#include <tuple>
+#include <filesystem>
+#include <iostream>
+#include <fstream>
+
+#define QUERY_FILENAME "query.csv"
+#define QUERY_EMB_FILENAME "query_emb.csv"
+#define GROUNDTRUTH_FILENAME "groundtruth.csv"
+
+class VortexBenchmarkDataset {
+    void read_queries(uint64_t num_queries);
+    void read_query_embs();
+    void read_groundtruth();
+
+    uint64_t next_query = 0;
+    uint64_t emb_dim = 1024;
+    std::string dataset_dir;
+    std::vector<std::string> queries;
+    std::vector<float*> query_embs;
+    std::vector<std::vector<std::string>> query_groundtruth;
+
+    public:
+        VortexBenchmarkDataset(const std::string& dataset_dir,uint64_t num_queries,uint64_t emb_dim);
+        
+        uint64_t get_next_query_index();
+        void reset(){ next_query = 0; }
+
+        const std::vector<std::string>& get_groundtruth(uint64_t query_index);
+        const std::string& get_query(uint64_t query_index);
+        const float* get_embeddings(uint64_t query_index);
+};
+
