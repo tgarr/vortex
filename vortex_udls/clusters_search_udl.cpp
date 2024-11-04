@@ -10,7 +10,7 @@ namespace cascade{
 #define MY_UUID     "11a2c123-2200-21ac-1755-0002ac220000"
 #define MY_DESC     "UDL search within the clusters to find the top K embeddings that the queries close to."
 
-#define CLUSTER_EMB_OBJECTPOOL_PREFIX "/rag/emb/cluster"
+#define CLUSTER_EMB_OBJECTPOOL_PREFIX "/rag/emb/clusters/cluster"
 
 std::string get_uuid() {
     return MY_UUID;
