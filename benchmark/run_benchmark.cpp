@@ -23,6 +23,7 @@ void print_help(const std::string& bin_name){
     std::cout << " -x <batch_max_size>\t\tmaximum batch size (default: " << DEFAULT_BATCH_MAX_SIZE << ")" << std::endl;
     std::cout << " -u <batch_time_us>\t\tmaximum time to wait for the batch minimum size, in microseconds (default: " << DEFAULT_BATCH_TIME_US << ")" << std::endl;
     std::cout << " -t <num_result_threads>\tnumber of threads for processing results (default: " << DEFAULT_NUM_RESULT_THREADS << ")" << std::endl;
+    std::cout << " -d\t\t\t\tdo not dump timestamps in the remote servers (default: true)" << std::endl;
     std::cout << " -h\t\t\t\tshow this help" << std::endl;
 }
 
@@ -36,8 +37,9 @@ int main(int argc, char** argv){
     uint64_t num_queries = DEFAULT_NUM_QUERIES;
     uint64_t emb_dim = DEFAULT_DIMENSIONS;
     uint64_t num_result_threads = DEFAULT_NUM_RESULT_THREADS;
+    bool dump = true;
 
-    while ((c = getopt(argc, argv, "n:e:r:b:x:u:t:h")) != -1){
+    while ((c = getopt(argc, argv, "n:e:r:b:x:u:t:dh")) != -1){
         switch(c){
             case 'n':
                 num_queries = strtoul(optarg,NULL,10);
@@ -59,6 +61,9 @@ int main(int argc, char** argv){
                 break;
             case 't':
                 num_result_threads = strtoul(optarg,NULL,10);
+                break;
+            case 'd':
+                dump = false;
                 break;
             case '?':
             case 'h':
@@ -88,6 +93,7 @@ int main(int argc, char** argv){
     std::cout << "  batch_max_size = " << batch_max_size << std::endl;
     std::cout << "  batch_time_us = " << batch_time_us << std::endl;
     std::cout << "  num_result_threads = " << num_result_threads << std::endl;
+    std::cout << "  dump = " << dump << std::endl;
     std::cout << "  dataset_dir = " << dataset_dir << std::endl;
 
     VortexBenchmarkDataset dataset(dataset_dir,num_queries,emb_dim);
@@ -137,7 +143,7 @@ int main(int argc, char** argv){
 
     // write timestamps
     std::cout << "dumping timestamps ..." << std::endl;
-    vortex.dump_timestamps();
+    vortex.dump_timestamps(dump);
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
     return 0;

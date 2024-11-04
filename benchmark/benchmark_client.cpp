@@ -102,15 +102,18 @@ void VortexBenchmarkClient::wait_results(){
     }
 }
 
-void VortexBenchmarkClient::dump_timestamps(){
+void VortexBenchmarkClient::dump_timestamps(bool dump_remote){
     TimestampLogger::flush("client" + std::to_string(my_id) + ".dat");
-    capi.dump_timestamp(UDL1_TIMESTAMP_FILE,UDL1_PATH);
-    capi.dump_timestamp(UDL2_TIMESTAMP_FILE,UDL2_PATH);
-    capi.dump_timestamp(UDL3_TIMESTAMP_FILE,UDL3_PATH);
+
+    if(dump_remote){
+        capi.dump_timestamp(UDL1_TIMESTAMP_FILE,UDL1_PATH);
+        capi.dump_timestamp(UDL2_TIMESTAMP_FILE,UDL2_PATH);
+        capi.dump_timestamp(UDL3_TIMESTAMP_FILE,UDL3_PATH);
+    }
 }
 
 void VortexBenchmarkClient::result_received(nlohmann::json &result_json){
-    uint32_t batch_id = (int)result_json["query_batch_id"] / QUERY_BATCH_ID_MODULUS; // TODO this is weird: we should use a global unique identifier for each individual query
+    uint64_t batch_id = (int)result_json["query_batch_id"] / QUERY_BATCH_ID_MODULUS; // TODO this is weird: we should use a global unique identifier for each individual query
     std::string query_text(std::move(result_json["query"]));
 
     std::shared_lock<std::shared_mutex> lock(client_thread->map_mutex);
@@ -186,7 +189,7 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
     queued_query_t to_send[batch_max_size];
     auto wait_start = std::chrono::steady_clock::now();
     auto batch_time = std::chrono::microseconds(batch_time_us);
-    uint32_t batch_id = 0;
+    uint64_t batch_id = 0;
     while(true){
         std::unique_lock<std::mutex> lock(thread_mtx);
         if(query_queue.empty()){

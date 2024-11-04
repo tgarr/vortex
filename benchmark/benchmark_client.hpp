@@ -58,10 +58,10 @@ class VortexBenchmarkClient {
         ClientThread(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim);
         void push_query(queued_query_t &queued_query);
         void signal_stop();
-        std::unordered_map<uint32_t,uint64_t> batch_size;
+        std::unordered_map<uint64_t,uint64_t> batch_size;
 
         // TODO this is inefficient: we should use a global identifier (query_id_t) for each query and send it through the pipeline, so it's easy to identify them later when the results come back
-        std::unordered_map<uint32_t,std::unordered_map<std::string,std::pair<uint64_t,query_id_t>>> batched_query_to_index_and_id;
+        std::unordered_map<uint64_t,std::unordered_map<std::string,std::pair<uint64_t,query_id_t>>> batched_query_to_index_and_id;
         std::shared_mutex map_mutex;
 
         inline void start(){
@@ -131,6 +131,6 @@ class VortexBenchmarkClient {
     uint64_t query(const std::string& query,const float* query_emb);
     void wait_results();
     const std::vector<std::string>& get_result(query_id_t query_id);
-    void dump_timestamps();
+    void dump_timestamps(bool dump_remote = true);
 };
 
