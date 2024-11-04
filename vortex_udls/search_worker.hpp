@@ -73,6 +73,10 @@ public:
     }
 
 
+    /***
+     * Run ANN algorithm on the query and emit the results
+     * TODO: this function is currrently blocking. Decrease the time it holds the lock
+     */
     void search_and_emit(DefaultCascadeContextType* typed_ctxt) {
         while (execution_thread_running) {
             std::unique_lock<std::shared_mutex> map_lock(cluster_search_index_map_mutex);

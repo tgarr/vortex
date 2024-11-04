@@ -89,11 +89,14 @@ void AggGenOCDPO::NotifyThread::signal_stop() {
 
 void AggGenOCDPO::NotifyThread::main_loop(DefaultCascadeContextType* typed_ctxt) {
     std::unique_lock<std::mutex> lock(parent->map_mutex, std::defer_lock);
-    while (running || !parent->query_api_futures.empty()) {
+    while (running) {
         lock.lock();
         parent->map_cv.wait(lock, [&] { 
             return parent->new_request || !parent->query_api_futures.empty() || !running; 
         });
+        if (!running)
+            break;
+
         for (auto it = parent->query_api_futures.begin(); it != parent->query_api_futures.end();) {
             auto& future = it->second;
             if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
@@ -107,7 +110,7 @@ void AggGenOCDPO::NotifyThread::main_loop(DefaultCascadeContextType* typed_ctxt)
             }
         }
         lock.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 

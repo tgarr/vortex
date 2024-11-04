@@ -14,9 +14,10 @@
                         "emb_dim":1024,
                         "top_num_centroids":2,
                         "faiss_search_type":0,
-                        "compute_embedding":false,
-                        "encoder_name":"text-embedding-3-small".
-                        "openai_api_key":"your_openai_api_key"
+                        "include_encoder":false,
+                        "encoder_name":"text-embedding-3-small",
+                        "openai_api_key":"your_openai_api_key",
+                        "emit_key_prefix":"/rag/emb/clusters_search"
                     }],
                 "destinations": [{"/rag/emb/clusters_search":"put"}]
             },
