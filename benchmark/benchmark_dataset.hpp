@@ -18,6 +18,7 @@ class VortexBenchmarkDataset {
 
     uint64_t next_query = 0;
     uint64_t emb_dim = 1024;
+    bool groundtruth_loaded = false;
     std::string dataset_dir;
     std::vector<std::string> queries;
     std::vector<float*> query_embs;
@@ -28,6 +29,7 @@ class VortexBenchmarkDataset {
         
         uint64_t get_next_query_index();
         void reset(){ next_query = 0; }
+        bool has_groundtruth(){ return groundtruth_loaded; }
 
         const std::vector<std::string>& get_groundtruth(uint64_t query_index);
         const std::string& get_query(uint64_t query_index);

@@ -16,7 +16,28 @@ VortexBenchmarkClient::~VortexBenchmarkClient(){
         t.join();
     }
 
-    // TODO print batching statistics
+    // print batching statistics
+    std::cout << "batching statistics:" << std::endl;
+    std::vector<uint64_t> values;
+    values.reserve(client_thread->batch_size.size());
+    double sum = 0.0;
+    for(const auto& [batch_id, sz] : client_thread->batch_size){
+        values.push_back(sz);
+        sum += sz;
+    }
+
+    double avg = sum / client_thread->batch_size.size();
+    std::sort(values.begin(),values.end());
+    auto min = values.front();
+    auto max = values.back();
+    auto median = values[values.size()/2];
+    auto p95 = values[(uint64_t)(values.size()*0.95)];
+
+    std::cout << "  avg: " << avg << std::endl;
+    std::cout << "  median: " << median << std::endl;
+    std::cout << "  min: " << min << std::endl;
+    std::cout << "  max: " << max << std::endl;
+    std::cout << "  p95: " << p95 << std::endl;
 }
 
 void VortexBenchmarkClient::setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim,uint64_t num_result_threads){
