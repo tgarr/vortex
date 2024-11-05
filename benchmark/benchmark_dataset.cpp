@@ -90,6 +90,27 @@ void VortexBenchmarkDataset::read_query_embs(){
 }
 
 void VortexBenchmarkDataset::read_groundtruth(){
-    // TODO
+    std::filesystem::path filename = std::filesystem::path(dataset_dir) / GROUNDTRUTH_FILENAME; 
+    
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "  No groundtruth file found!" << std::endl;
+        groundtruth_loaded = false;
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        std::vector<std::string> row;
+        std::stringstream line_stream(line);
+        std::string cell;
+        while (std::getline(line_stream, cell, ',')) {
+            row.push_back(cell);
+        }
+        query_groundtruth.push_back(row);
+    }
+
+    file.close();
+    groundtruth_loaded = true;
 }
 

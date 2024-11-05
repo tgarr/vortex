@@ -27,6 +27,12 @@ void print_help(const std::string& bin_name){
     std::cout << " -h\t\t\t\tshow this help" << std::endl;
 }
 
+inline bool is_in_topk(const std::vector<std::string>& groundtruth, const std::string& target, int k) {
+     k = std::min(k, (int)groundtruth.size());
+     auto it = std::find(groundtruth.begin(), groundtruth.begin() + k, target);
+     return it != (groundtruth.begin() + k);
+}
+
 int main(int argc, char** argv){
     char c;
     uint64_t send_rate = 0;
@@ -136,10 +142,31 @@ int main(int argc, char** argv){
     vortex.wait_results();
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
-    // TODO recall
-    std::cout << "computing recall ..." << std::endl;
-    // vortex.get_result(query_id); 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    // recall
+    if(dataset.has_groundtruth()){
+        std::cout << "computing recall ..." << std::endl;
+        double total_recall = 0.0;
+        for (const auto& [query_id, query_index] : query_id_to_index){
+            const auto& results = vortex.get_result(query_id);
+            const auto& groundtruth = dataset.get_groundtruth(query_index);
+
+            uint64_t topk = results.size();
+            uint64_t found = 0;
+            for (const auto& result : results) {
+                 std::string doc_index = result.substr(result.find_last_of('/') + 1); // indices are written as string
+                 if (is_in_topk(groundtruth, doc_index, topk)) {
+                      found++;
+                 }
+            }
+            total_recall += static_cast<double>(found) / topk;
+        }
+
+        double avg_recall = total_recall / num_queries;
+        std::cout << " avg recall: " << avg_recall << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+    } else {
+        std::cout << "no groundtruth available, skipping computing recall ..." << std::endl;
+    }
 
     // write timestamps
     std::cout << "dumping timestamps ..." << std::endl;
