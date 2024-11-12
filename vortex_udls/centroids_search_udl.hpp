@@ -12,7 +12,7 @@ namespace cascade{
 
 #define MY_UUID     "10a2c111-1100-1100-1000-0001ac110000"
 #define MY_DESC     "UDL search among the centroids to find the top num_centroids that the queries close to."
-
+#define NEXT_UDL_SUBGROUP_ID 0 //TODO: put this to config
 
 std::string get_uuid() {
     return MY_UUID;
@@ -31,7 +31,6 @@ struct batchedTask {
     // std::vector<std::string> queries;
     // // CURL *curl;
     // std::unique_ptr<float[]> all_embeddings;
-    /*** TODO: this incurs extra copy of object, optimize this use Blob emplace */
     batchedTask(std::string key, uint32_t client_id, uint32_t query_batch_id, Blob&& blob)
         : key(key), client_id(client_id), query_batch_id(query_batch_id), blob(std::move(blob)) {}
 };

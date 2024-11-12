@@ -5,6 +5,7 @@ namespace derecho{
 namespace cascade{
 
 
+
 CentroidsSearchOCDPO::ProcessBatchedTasksThread::ProcessBatchedTasksThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl)
     : my_thread_id(thread_id), parent(parent_udl), running(false) {}
 
@@ -162,9 +163,8 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
 #endif
-        /*** TODO: change to use trigger_put */
-        // typed_ctxt->get_service_client_ref().trigger_put(std::move(obj));
-        typed_ctxt->get_service_client_ref().put_and_forget(obj);
+                
+        typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first), true); // TODO: change this hard-coded subgroup_id
 #ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
 #endif
@@ -198,7 +198,6 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::main_loop(DefaultCascadeCo
         this->process_task(std::move(task), typed_ctxt);
         // std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    
 }
 
 bool CentroidsSearchOCDPO::retrieve_and_cache_centroids_index(DefaultCascadeContextType* typed_ctxt){
@@ -209,6 +208,11 @@ bool CentroidsSearchOCDPO::retrieve_and_cache_centroids_index(DefaultCascadeCont
     int filled_centroid_embs = this->centroids_embs->retrieve_grouped_embeddings(this->centroids_emb_prefix,typed_ctxt);
     if (filled_centroid_embs == -1) {
         dbg_default_error("Failed to fill the centroids embeddings in cache, at centroids_search_udl.");
+        return false;
+    }
+    int initialized = this->centroids_embs->initialize_groupped_embeddings_for_search();
+    if (initialized == -1) {
+        dbg_default_error("Failed to initialize the faiss index for the centroids embeddings, at centroids_search_udl.");
         return false;
     }
     cached_centroids_embs = true;

@@ -21,7 +21,7 @@
 
 #include "serialize_utils.hpp"
 
-#define MAX_NUM_QUERIES_PER_BATCH 100
+#define MAX_NUM_QUERIES_PER_BATCH 1000
 
 namespace derecho{
 namespace cascade{
@@ -34,6 +34,7 @@ public:
      int num_embs;  //  e.g. 1000. The number of embeddings in the array
 
      float* embeddings; 
+     std::atomic<bool> initialized_index; // Whether the index has been built
 
      std::unique_ptr<faiss::IndexFlatL2> cpu_flatl2_index; // FAISS index object. Initialize if use CPU Flat search
      std::unique_ptr<faiss::gpu::StandardGpuResources> gpu_res;  // FAISS GPU resources. Initialize if use GPU search
@@ -55,11 +56,13 @@ public:
      GroupedEmbeddingsForSearch(int type, int dim) 
           : faiss_search_type(type), emb_dim(dim), num_embs(0), embeddings(nullptr),added_query_offset(0), query_embs_in_search(false) {
           query_embs = new float[dim * MAX_NUM_QUERIES_PER_BATCH];
+          initialized_index.store(false);
      }
 
      GroupedEmbeddingsForSearch(int dim, int num, float* data) 
           : faiss_search_type(0), emb_dim(dim), num_embs(num), embeddings(data), added_query_offset(0), query_embs_in_search(false) {
           query_embs = new float[dim * MAX_NUM_QUERIES_PER_BATCH];
+          initialized_index.store(false);
      }
 
      /*** 
@@ -169,12 +172,12 @@ public:
           }
           dbg_default_trace("[{}]: embs_prefix={}, num_emb_objects={} retrieved.", __func__, embs_prefix, num_retrieved_embs);
 
-          // 2. assign the retrieved embeddings to the object
+          // 2. assign the retrieved embeddings
           this->num_embs = num_retrieved_embs;
           this->embeddings = data;
           // this->centroids_embs[cluster_id]= std::make_unique<GroupedEmbeddingsForSearch>(this->emb_dim, retrieved_num_embs, data);
-          int init_search_res = this->initialize_groupped_embeddings_for_search();
-          return init_search_res;
+          // int init_search_res = this->initialize_groupped_embeddings_for_search();
+          return 0;
      }
 
      int get_num_embeddings(){
@@ -193,6 +196,7 @@ public:
                dbg_default_error("Failed to initialize faiss search type, at clusters_search_udl.");
                return -1;
           }
+          initialized_index.store(true);
           return 0;
      }
 
@@ -222,7 +226,9 @@ public:
      }
 
      /***
-      * Search the top K embeddings that are close to the queries in batch
+      * Search the top K embeddings that are close to the queries in batch, 
+      * this implementation uses the locally cached query embeddings, and requires locks
+      * TODO: to be replaced by the search below, the UDL should handle the batched queries
       * @param top_k: number of top embeddings to return
       * @param D: distance array, storing the distance of the top_k embeddings
       * @param I: index array, storing the index of the top_k embeddings
@@ -270,6 +276,7 @@ public:
           query_embs_cv.notify_one();
           return true;
      }    
+
 
      /***
       * Search the top K embeddings that are close to one query

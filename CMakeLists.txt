@@ -113,6 +113,7 @@ target_compile_definitions(centroids_search_udl PRIVATE
 
 
 add_library(clusters_search_udl SHARED 
+                                vortex_udls/clusters_search_udl.hpp 
                                 vortex_udls/clusters_search_udl.cpp 
                                 vortex_udls/serialize_utils.cpp)
 target_link_libraries(clusters_search_udl PRIVATE ${UDL_COMMON_LIBS})
