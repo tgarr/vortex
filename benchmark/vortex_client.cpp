@@ -156,9 +156,7 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
                          auto& tuple_vector = this->sent_queries[query_text];
                          if (!tuple_vector.empty()) {
                               auto first_tuple = tuple_vector.front();       
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
                          TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,this->my_node_id,std::get<0>(first_tuple),std::get<1>(first_tuple));
-#endif
                               // std::cout << "Received result for query: " << query_text << " from client: " << this->my_node_id << " batch_id: " << batch_id << " q_id: " << q_id << std::endl;
                               // remove batch_id from this->sent_queries
                               tuple_vector.erase(tuple_vector.begin());
@@ -234,17 +232,13 @@ bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi,const std::vector<st
           emb_query_obj.key = key;
           emb_query_obj.blob = Blob(reinterpret_cast<const uint8_t*>(emb_query_string.c_str()), emb_query_string.size());
           // 1.4. send the object to the cascade
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < this->batch_size; ++j) {
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,this->my_node_id,batch_id,j);
           }
-#endif
           capi.put_and_forget(emb_query_obj, false); // not only trigger the UDL, but also update state. TODO: Need more thinking here. 
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < this->batch_size; ++j) {
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,this->my_node_id,batch_id,j);
           }
-#endif
           num_queries_to_send -= this->batch_size;
           std::this_thread::sleep_for(std::chrono::microseconds(this->query_interval)); // TODO
           if (batch_id % 200 == 0) {

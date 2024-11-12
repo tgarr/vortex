@@ -250,7 +250,6 @@ public:
           }
           *I = new long[top_k * nq];
           *D = new float[top_k * nq];
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           std::vector<std::tuple<int, int>> query_batch_infos;
           for (const auto& key : this->query_keys) {
                int client_id = -1;
@@ -260,13 +259,10 @@ public:
                query_batch_infos.emplace_back(client_id, query_batch_id);
                TimestampLogger::log(LOG_BATCH_FAISS_SEARCH_SIZE,nq,query_batch_id,cluster_id);
           }
-#endif
           search(nq, this->query_embs, top_k, *D, *I);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (const auto& batch_info: query_batch_infos) {
                TimestampLogger::log(LOG_BATCH_FAISS_SEARCH_END,std::get<0>(batch_info),std::get<1>(batch_info),cluster_id);
           }
-#endif
           // reset the query_embs array and transfer ownership of the query_texts
           this->added_query_offset = 0;
           q_list = std::move(this->query_texts);
