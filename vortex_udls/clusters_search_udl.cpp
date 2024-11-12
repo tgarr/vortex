@@ -168,7 +168,6 @@ void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(Defau
 
     delete[] I;
     delete[] D;
-    std::cout << "Finished run_cluster_search for cluster: " << this->cluster_id << std::endl;
 }
 
 // check pending queries, flip the shadow_flag if needed
@@ -218,7 +217,6 @@ void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextTy
             cur_query_buffer = shadow_query_buffer.get();
         }
         run_cluster_search_and_emit(typed_ctxt, cur_query_buffer);
-        std::cout << "finished cluster search for cluster: " << this->cluster_id << std::endl;
         // reset the current query buffer
         cur_query_buffer->reset();
         // // use lock to flip the shadow buffer

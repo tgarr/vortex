@@ -12,7 +12,7 @@ namespace cascade{
 
 #define MY_UUID     "10a2c111-1100-1100-1000-0001ac110000"
 #define MY_DESC     "UDL search among the centroids to find the top num_centroids that the queries close to."
-#define NEXT_UDL_SUBGROUP_ID 0 //TODO: put this to config
+#define NEXT_UDL_SUBGROUP_ID 1 // cluster_search udl subgroup_id
 
 std::string get_uuid() {
     return MY_UUID;
