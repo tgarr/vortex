@@ -87,9 +87,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
             return;
     }
     // 1. get the query embeddings from the object
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-#endif
     float* data;
     uint32_t nq;
     std::vector<std::string> query_list;
@@ -97,16 +95,12 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         dbg_default_error("Failed to get the query, embeddings from the object, at centroids_search_udl.");
         return;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING 
     TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-#endif
 
     // 2. search the top_num_centroids that are close to the query
     long* I = new long[parent->top_num_centroids * nq];
     float* D = new float[parent->top_num_centroids * nq];
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-#endif
     try{
         parent->centroids_embs->search(nq, data, parent->top_num_centroids, D, I);
     } catch (const std::exception& e) {
@@ -115,18 +109,14 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         return;
     }
 
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-#endif
     /*** 3. emit the result to the subsequent UDL
             trigger the subsequent UDL by evict the queries to shards that contains its top cluster_embs 
             according to affinity set sharding policy
     ***/
     std::map<long, std::vector<int>> cluster_ids_to_query_ids = std::map<long, std::vector<int>>();
     this->combine_common_clusters(I, nq, cluster_ids_to_query_ids);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-#endif
     for (const auto& pair : cluster_ids_to_query_ids) {
         if (pair.first == -1) {
             dbg_default_error( "Error: [CentroidsSearchOCDPO] for key: {} a selected cluster among top {}, has cluster_id -1", task_ptr->key, parent->top_num_centroids);
@@ -160,14 +150,10 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         ObjectWithStringKey obj;
         obj.key = new_key;
         obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emb_string.c_str()), query_emb_string.size());
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
-#endif
-                
+
         typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first), true); // TODO: change this hard-coded subgroup_id
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
-#endif
         dbg_default_trace("[Centroids search ocdpo]: Emitted key: {}",new_key);
     }
     delete[] I;
@@ -176,9 +162,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         delete[] data;
     // after using the batched task's blob data, release the memory
     task_ptr->blob.memory_mode = derecho::cascade::object_memory_mode_t::DEFAULT;
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-#endif
     dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", task_ptr->key);
 }
 
@@ -201,9 +185,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::main_loop(DefaultCascadeCo
 }
 
 bool CentroidsSearchOCDPO::retrieve_and_cache_centroids_index(DefaultCascadeContextType* typed_ctxt){
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_LOADING_START,this->my_id,0,0);
-#endif
     //  Fill centroids embs and keep it in memory cache
     int filled_centroid_embs = this->centroids_embs->retrieve_grouped_embeddings(this->centroids_emb_prefix,typed_ctxt);
     if (filled_centroid_embs == -1) {
@@ -216,9 +198,7 @@ bool CentroidsSearchOCDPO::retrieve_and_cache_centroids_index(DefaultCascadeCont
         return false;
     }
     cached_centroids_embs = true;
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_LOADING_END,this->my_id,0,0);
-#endif
     return true;
 }
 
@@ -233,7 +213,6 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
                             uint32_t worker_id) {
     /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/centroids_search instead of /rag/emb, i.e. the objp name***/
     dbg_default_trace("[Centroids search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     // Logging purpose for performance evaluation
     if (key_string == "flush_logs") {
         std::string log_file_name = "node" + std::to_string(my_id) + "_udls_timestamp.dat";
@@ -241,16 +220,13 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
         std::cout << "Flushed logs to " << log_file_name <<"."<< std::endl;
         return;
     }
-#endif
 
     int client_id = -1;
     int query_batch_id = -1;
     bool usable_logging_key = parse_batch_id(key_string, client_id, query_batch_id); // Logging purpose
     if (!usable_logging_key)
         dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_START,client_id,query_batch_id,this->my_id);
-#endif
 
     Blob blob = std::move(const_cast<Blob&>(object.blob));
     blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED;
@@ -262,9 +238,7 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
     new_request = false;
     lock.unlock();
     active_tasks_cv.notify_one();
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,client_id,query_batch_id,this->my_id);
-#endif
     dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", key_string);
 }
 

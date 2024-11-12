@@ -118,9 +118,7 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
     if (doc_tables.find(cluster_id) != doc_tables.end()) {
         return true;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_START, my_id, 0, cluster_id);
-#endif
     // 0. check the keys for this grouped embedding objects stored in cascade
     //    because of the message size, the map for one cluster may split into multiple chunks stored in Cascade
     bool stable = 1; 
@@ -158,9 +156,7 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
             return false;
         }
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING     
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_END, my_id, 0, cluster_id);
-#endif
     return true;
 }
 
@@ -181,9 +177,7 @@ bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id,
         dbg_default_error("Failed to find the doc pathname for cluster_id={} and emb_id={}, query={}.", cluster_id, emb_index);
         return false;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_START, this->my_id, emb_index, cluster_id);
-#endif 
     auto& pathname = doc_tables[cluster_id][emb_index];
     if(!retrieve_docs){
         res_doc = pathname;
@@ -201,9 +195,7 @@ bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id,
     std::string doc_str(doc_data, reply.blob.size);  /*** TODO: this is a copy, need to optimize */
     this->doc_contents[cluster_id][emb_index] = doc_str;
     res_doc = this->doc_contents[cluster_id][emb_index];
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_END, this->my_id, emb_index, cluster_id);
-#endif
     return true;
 }
 
@@ -275,15 +267,11 @@ void AggGenOCDPO::process_result_and_notify_clients(DefaultCascadeContextType* t
         std::string result_json_str = result_json.dump();
         Blob result_blob(reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
         try {
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
-#endif
             std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
             typed_ctxt->get_service_client_ref().notify(result_blob,notification_pathname,client_id);
             dbg_default_trace("[AggregateGenUDL] echo back to node {}", client_id);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
             TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
-#endif
             // 3. (garbage collection) remove query and query_result from the cache
             garbage_collect_query_results(query_text, client_id, query_batch_id, qid);
         } catch (derecho::derecho_exception& ex) {
@@ -333,10 +321,8 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
         return;
     }
         
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     int query_batch_id = batch_id * QUERY_BATCH_ID_MODULUS + qid % QUERY_BATCH_ID_MODULUS; // cast down qid for logging purpose
     TimestampLogger::log(LOG_TAG_AGG_UDL_START,client_id,query_batch_id,cluster_id);
-#endif
     dbg_default_trace("[AggregateGenUDL] receive cluster search result from cluster{}.", cluster_id);
     std::string query_text;
     std::vector<DocIndex> cluster_results;
@@ -348,9 +334,7 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("{}, Failed to deserialize the cluster searched result from the object.", __func__);
         return;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE, client_id, query_batch_id, cluster_id);
-#endif
     new_request = true;
     std::unique_lock<std::mutex> lock(map_mutex);  // lock for map accessing
     /*** 1.1 If the query result has sent back to the client before, skip sending it again.
@@ -373,14 +357,10 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
     query_results[query_text]->add_cluster_result(cluster_id, cluster_results);
     // 3. check if all cluster results are collected for this query
     if (!query_results[query_text]->is_all_results_collected()) {
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         TimestampLogger::log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, client_id, query_batch_id, cluster_id);
-#endif
         goto cleanup;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, client_id, query_batch_id, cluster_id);
-#endif
     // 4. All cluster results are collected. Retrieve the top_k docs contents
     if (!query_results[query_text]->retrieved_top_k_docs) {
         bool get_top_k_docs_success = get_topk_docs(typed_ctxt, query_text);
@@ -389,9 +369,7 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
             goto cleanup;
         }
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, client_id, query_batch_id, qid);
-#endif
     // 5. run LLM with the query and its top_k closest docs
     if (include_llm) {
         async_run_llm_with_top_k_docs(query_text);
@@ -399,9 +377,7 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
     // 6. put the result to cascade and notify the client
         process_result_and_notify_clients(typed_ctxt, query_text);
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_TAG_AGG_UDL_END, client_id, query_batch_id, qid);
-#endif
 cleanup:
     new_request = false;
     lock.unlock();

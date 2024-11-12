@@ -110,9 +110,7 @@ bool ClustersSearchOCDPO::ClusterSearchWorker::check_and_retrieve_cluster_index(
     uint32_t cluster_id = static_cast<uint32_t>(this->cluster_id);
     // Acquire a unique lock to modify the cluster search index
     std::unique_lock<std::shared_mutex> write_lock(parent->cluster_search_index_mutex);
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START, parent->my_id, cluster_id, 0);
-#endif
     // Double-check if the cluster was inserted by another thread
     if (parent->cluster_search_index->initialized_index.load()) {
         return true;
@@ -130,9 +128,7 @@ bool ClustersSearchOCDPO::ClusterSearchWorker::check_and_retrieve_cluster_index(
         dbg_default_error("Failed to initialize the index for the cluster embeddings, at clusters_search_udl.");
         return false;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_END, parent->my_id, cluster_id, 0);
-#endif
 
     return true;
 }
@@ -158,11 +154,9 @@ void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(Defau
         obj.key = std::string(EMIT_AGGREGATE_PREFIX) + "/" + new_keys[k];
         std::string query_emit_content = serialize_cluster_search_result(parent->top_k, I, D, k, query_buffer->query_list[k]);
         obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
         int client_id = -1, query_batch_id = -1;
         parse_batch_id(obj.key, client_id, query_batch_id);
         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,client_id,query_batch_id, this->cluster_id);
-#endif
         typed_ctxt->get_service_client_ref().put_and_forget(obj);
     }
 
@@ -302,14 +296,12 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
         return;
     }
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
     int client_id = -1;
     int query_batch_id = -1;
     bool usable_logging_key = parse_batch_id(key_string, client_id, query_batch_id); // Logging purpose
     if (!usable_logging_key)
         dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
     TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,client_id,query_batch_id,cluster_id);
-#endif
     // 1. Move the object to the active queue to be processed
     this->cluster_search_thread->push_to_query_buffer(cluster_id, object.blob, key_string);
     dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue.", key_string );
