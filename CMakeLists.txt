@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(CURL REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(spdlog 1.3.1 REQUIRED)
 find_package(derecho CONFIG REQUIRED)
@@ -26,9 +27,6 @@ if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
     set(CMAKE_INSTALL_LIBDIR lib)
 endif()
 
-# enable evaluation
-set(ENABLE_VORTEX_EVALUATION_LOGGING TRUE)
-# add_definitions(-DENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING})
 
 
 include_directories(
@@ -52,16 +50,14 @@ target_compile_definitions(run_benchmark PRIVATE
     LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
     LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
     LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
-    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
-add_executable(latency_client benchmark/vortex_client.cpp benchmark/latency_client.cpp vortex_udls/rag_utils.cpp)
+add_executable(latency_client benchmark/vortex_client.cpp benchmark/latency_client.cpp vortex_udls/serialize_utils.cpp)
 target_link_libraries(latency_client PRIVATE libwsong::perf derecho derecho::cascade pthread OpenSSL::Crypto)
 target_compile_definitions(latency_client PRIVATE
     LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
     LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
     LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
-    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
 set(UDL_COMMON_LIBS derecho derecho::cascade pthread faiss CUDA::cudart)
@@ -74,8 +70,8 @@ set(LOG_BATCH_FAISS_SEARCH_SIZE 30032)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_START 20000)
 set(LOG_CENTROIDS_EMBEDDINGS_LOADING_START 20010)
 set(LOG_CENTROIDS_EMBEDDINGS_LOADING_END 20011)
-set(LOG_CENTROIDS_SEARCH_DESERIALIZE_START 20020)
-set(LOG_CENTROIDS_SEARCH_DESERIALIZE_END 20021)
+set(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START 20020)
+set(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END 20021)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START 20030)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END 20031)
 set(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END 20041)
@@ -95,28 +91,34 @@ set(LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END 30041)
 set(LOG_CLUSTER_SEARCH_UDL_EMIT_START 30050)
 
 
-add_library(centroids_search_udl SHARED vortex_udls/centroids_search_udl.cpp vortex_udls/rag_utils.cpp)
-target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS})
+add_library(centroids_search_udl SHARED
+                            vortex_udls/centroids_search_udl.hpp 
+                            vortex_udls/centroids_search_udl.cpp 
+                            vortex_udls/serialize_utils.cpp 
+                            vortex_udls/api_utils.cpp)
+target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS} CURL::libcurl)
 target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_START=${LOG_CENTROIDS_EMBEDDINGS_LOADING_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_END=${LOG_CENTROIDS_EMBEDDINGS_LOADING_END}
-    LOG_CENTROIDS_SEARCH_DESERIALIZE_START=${LOG_CENTROIDS_SEARCH_DESERIALIZE_START}
-    LOG_CENTROIDS_SEARCH_DESERIALIZE_END=${LOG_CENTROIDS_SEARCH_DESERIALIZE_END}
+    LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START=${LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START}
+    LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END=${LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START}
     LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START}
     LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END}
     LOG_CENTROIDS_EMBEDDINGS_UDL_END=${LOG_CENTROIDS_EMBEDDINGS_UDL_END}
-    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
     LOG_BATCH_FAISS_SEARCH_SIZE=${LOG_BATCH_FAISS_SEARCH_SIZE}
     LOG_BATCH_FAISS_SEARCH_START=${LOG_BATCH_FAISS_SEARCH_START}
     LOG_BATCH_FAISS_SEARCH_END=${LOG_BATCH_FAISS_SEARCH_END}
 )
 
 
-add_library(clusters_search_udl SHARED vortex_udls/clusters_search_udl.cpp vortex_udls/rag_utils.cpp)
+add_library(clusters_search_udl SHARED 
+                                vortex_udls/clusters_search_udl.hpp 
+                                vortex_udls/clusters_search_udl.cpp 
+                                vortex_udls/serialize_utils.cpp)
 target_link_libraries(clusters_search_udl PRIVATE ${UDL_COMMON_LIBS})
 
 target_compile_definitions(clusters_search_udl PRIVATE
@@ -131,7 +133,6 @@ target_compile_definitions(clusters_search_udl PRIVATE
     LOG_BATCH_FAISS_SEARCH_SIZE=${LOG_BATCH_FAISS_SEARCH_SIZE}
     LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END=${LOG_CLUSTER_SEARCH_CONSTRUCT_KEYS_END}
     LOG_CLUSTER_SEARCH_UDL_EMIT_START=${LOG_CLUSTER_SEARCH_UDL_EMIT_START}
-    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
 )
 
 # AGG GENERATE UDL tags
@@ -147,9 +148,15 @@ set(LOG_TAG_AGG_UDL_LOAD_DOC_END 40221)
 set(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END 40021)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_START 40030)
 set(LOG_TAG_AGG_UDL_PUT_RESULT_END 40031)
+set(LOG_TAG_AGG_UDL_END 40100)
 
-add_library(aggregate_generate_udl SHARED vortex_udls/aggregate_generate_udl.cpp vortex_udls/rag_utils.cpp)
-target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade)
+
+add_library(aggregate_generate_udl SHARED 
+            vortex_udls/aggregate_generate_udl.hpp 
+            vortex_udls/aggregate_generate_udl.cpp 
+            vortex_udls/serialize_utils.cpp 
+            vortex_udls/api_utils.cpp)
+target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade CURL::libcurl)
 
 target_compile_definitions(aggregate_generate_udl PRIVATE
     LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
@@ -165,14 +172,15 @@ target_compile_definitions(aggregate_generate_udl PRIVATE
     LOG_TAG_AGG_UDL_RETRIEVE_DOC_END=${LOG_TAG_AGG_UDL_RETRIEVE_DOC_END}
     LOG_TAG_AGG_UDL_PUT_RESULT_START=${LOG_TAG_AGG_UDL_PUT_RESULT_START}
     LOG_TAG_AGG_UDL_PUT_RESULT_END=${LOG_TAG_AGG_UDL_PUT_RESULT_END}
-    ENABLE_VORTEX_EVALUATION_LOGGING=${ENABLE_VORTEX_EVALUATION_LOGGING}
     LOG_FAISS_SEARCH_BATCH_SIZE=${LOG_FAISS_SEARCH_BATCH_SIZE}
+    LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
 )
 
 add_custom_command(TARGET aggregate_generate_udl POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/cfg
         ${CMAKE_CURRENT_BINARY_DIR}/cfg
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/perf_data
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/perf_data
         ${CMAKE_CURRENT_BINARY_DIR}/perf_data
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/benchmark/setup
         ${CMAKE_CURRENT_BINARY_DIR}/setup
@@ -184,6 +192,8 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/layout.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/layout.json
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/layout.json.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/layout.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/dfgs.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
@@ -192,6 +202,8 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/dfgs.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/dfgs.json
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/dfgs.json.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/dfgs.json
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
@@ -200,6 +212,8 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/udl_dlls.cfg
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/udl_dlls.cfg.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/udl_dlls.cfg
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n0/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
@@ -208,18 +222,26 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/clear_log.sh 
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/clear_log.sh
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/clear_log.sh
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/perf_data
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/perf_data
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/perf_data
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/perf_data
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/setup
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/latency_client
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/latency_client
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/latency_client
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cfg/clear_log.sh.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/layout.json.tmp

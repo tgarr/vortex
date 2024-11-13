@@ -13,7 +13,11 @@
                         "centroids_emb_prefix":"/rag/emb/centroids_obj",
                         "emb_dim":1024,
                         "top_num_centroids":2,
-                        "faiss_search_type":0
+                        "faiss_search_type":0,
+                        "include_encoder":false,
+                        "encoder_name":"text-embedding-3-small",
+                        "openai_api_key":"your_openai_api_key",
+                        "emit_key_prefix":"/rag/emb/clusters_search"
                     }],
                 "destinations": [{"/rag/emb/clusters_search":"put"}]
             },
@@ -40,7 +44,9 @@
                         "top_num_centroids":2,
                         "final_top_k":2,
                         "include_llm":false,
-                        "retrieve_docs":true
+                        "retrieve_docs":true,
+                        "openai_api_key":"your_openai_api_key",
+                        "llm_model_name":"gpt-4o-mini"
                 }],
                 "destinations": [{}]
             }
