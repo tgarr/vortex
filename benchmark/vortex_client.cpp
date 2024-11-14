@@ -101,7 +101,7 @@ bool VortexPerfClient::prepare_queries(const std::string& query_directory, std::
 
 
 
-bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs, std::string& response, uint32_t& query_batch_id) {
+bool VortexPerfClient::deserialize_result(const Blob& blob, std::vector<queryResult>& query_results) {
      if (blob.size == 0) {
           std::cerr << "Error: empty result blob." << std::endl;
           return false;
@@ -111,17 +111,26 @@ bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_t
      std::string json_string(json_data, json_size);
      try{
           nlohmann::json parsed_json = nlohmann::json::parse(json_string);
-          if (parsed_json.count("query") == 0) {
-               std::cerr << "Result JSON does not contain query." << std::endl;
+          if (!parsed_json.is_array()) {
+               std::cerr << "Expected JSON array." << std::endl;
                return false;
           }
-          query_text = parsed_json["query"];
-          query_batch_id = parsed_json["query_batch_id"];
-          if (parsed_json.contains("top_k_docs")) {
-               top_k_docs = parsed_json["top_k_docs"];
-          }
-          if (parsed_json.contains("response")) {
-               response = parsed_json["response"];
+          query_results.reserve(parsed_json.size());
+          for (const auto& item : parsed_json) {
+               if (!item.is_object()) {
+                    std::cerr << "Expected JSON object in array." << std::endl;
+                    continue;
+               }
+               queryResult qr;
+               qr.query_text = item["query"];
+               qr.query_batch_id = item["query_batch_id"];
+               if (item.contains("top_k_docs")) {
+                    qr.top_k_docs = item["top_k_docs"].get<std::vector<std::string>>();
+               }
+               if (item.contains("response")) {
+                    qr.llm_response = item["response"];
+               }
+               query_results.push_back(std::move(qr));
           }
      } catch (const nlohmann::json::parse_error& e) {
           std::cerr << "Result JSON parse error: " << e.what() << std::endl;
@@ -141,31 +150,30 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
      // 1.2. Register notification for this object pool
      bool ret = capi.register_notification_handler(
                [&](const Blob& result){
-                    std::string query_text;
-                    std::vector<std::string> top_k_docs;
-                    std::string llm_response;
-                    uint32_t query_batch_id;
-                    if (!deserialize_result(result, query_text, top_k_docs, llm_response, query_batch_id)) {
+                    std::vector<queryResult> query_results;
+                    if (!deserialize_result(result, query_results)) {
                          std::cerr << "Error: failed to deserialize the result from the notification." << std::endl;
                          return false;
                     }
-                    if (this->query_results.find(query_text) == this->query_results.end()) {
-                         this->query_results[query_text] = top_k_docs;
-                    }
-                    if (this->sent_queries.find(query_text) != this->sent_queries.end()) {
-                         auto& tuple_vector = this->sent_queries[query_text];
-                         if (!tuple_vector.empty()) {
-                              auto first_tuple = tuple_vector.front();       
-                         TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,this->my_node_id,std::get<0>(first_tuple),std::get<1>(first_tuple));
-                              // std::cout << "Received result for query: " << query_text << " from client: " << this->my_node_id << " batch_id: " << batch_id << " q_id: " << q_id << std::endl;
-                              // remove batch_id from this->sent_queries
-                              tuple_vector.erase(tuple_vector.begin());
-                              if (tuple_vector.empty()) {
-                                   this->sent_queries.erase(query_text);
-                              }
+                    for (const auto& qr : query_results) {
+                         if (this->query_results.find(qr.query_text) == this->query_results.end()) {
+                              this->query_results[qr.query_text] = qr.top_k_docs;
                          }
-                    } else {
-                         std::cerr << "Error: received result for query that is not sent." << std::endl;
+                         if (this->sent_queries.find(qr.query_text) != this->sent_queries.end()) {
+                              auto& tuple_vector = this->sent_queries[qr.query_text];
+                              if (!tuple_vector.empty()) {
+                                   auto first_tuple = tuple_vector.front();
+                                   TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,this->my_node_id,std::get<0>(first_tuple),std::get<1>(first_tuple));
+                                   // std::cout << "Received result for query: " << qr.query_text << " from client: " << this->my_node_id << " batch_id: " << std::get<0>(first_tuple) << " q_id: " << std::get<1>(first_tuple) << std::endl;
+                                   // remove batch_id from this->sent_queries
+                                   tuple_vector.erase(tuple_vector.begin());
+                                   if (tuple_vector.empty()) {
+                                        this->sent_queries.erase(qr.query_text);
+                                   }
+                              }
+                         } else {
+                              std::cerr << "Error: received result for query that is not sent." << std::endl;
+                         }
                     }
                     if (this->sent_queries.size() == 0 && num_queries_to_send.load() == 0) {
                          this->running = false;

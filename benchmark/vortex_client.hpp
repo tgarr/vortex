@@ -17,6 +17,14 @@ using namespace derecho::cascade;
 #define GROUNDTRUTH_FILENAME "groundtruth.csv"
 
 
+struct queryResult{
+     std::string query_text;
+     std::vector<std::string> top_k_docs;
+     uint32_t query_batch_id;
+     std::string llm_response;
+};
+
+
 inline bool is_in_topk(const std::vector<std::string>& groundtruth, const std::string& target, int k) {
      k = std::min(k, (int)groundtruth.size());
      auto it = std::find(groundtruth.begin(), groundtruth.begin() + k, target);
@@ -54,7 +62,7 @@ public:
      /***
      * Result JSON is in format of : {"query": query_text, "top_k_docs":[doc_text1, doc_text2, ...], "query_batch_id": query_batch_id}
      */
-     bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs, std::string& response, uint32_t& query_batch_id);
+     bool deserialize_result(const Blob& blob, std::vector<queryResult>& query_results);
      
      /***
       * Register notification to all servers, helper function to run_perf_test
