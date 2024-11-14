@@ -6,13 +6,6 @@
 #include "clusters_search_udl.hpp"
 
 
-// Two array for each group_embedding_for_search_object
-// retrieve embeddings at search thread
-// main thread only add things into the queue that is not running. When it runs, switch to add to a different page
-// two threads, one for search (round-robin), one for adding to the queue
-// if thread_pool, then allocate each thread to handle a subset of clusters
-
-
 namespace derecho{
 namespace cascade{
 
@@ -213,9 +206,6 @@ void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextTy
         run_cluster_search_and_emit(typed_ctxt, cur_query_buffer);
         // reset the current query buffer
         cur_query_buffer->reset();
-        // // use lock to flip the shadow buffer
-        // query_buff_lock.lock();
-        // use_shadow_flag.fetch_xor(true);
         wait_start = std::chrono::steady_clock::now();
     }
 }
@@ -249,16 +239,12 @@ void ClustersSearchOCDPO::ClusterSearchWorker::push_to_query_buffer(int cluster_
         }
         return query_buffer->could_add_query_nums(nq);
     });
-    // incurs a copy of the query embedding float[], to make it aligned with the other embeddings in the buffer for batching
+    // this step incurs a copy of the query embedding float[], to make it aligned with the other embeddings in the buffer for batching
     if (use_shadow_flag.load()) {
         shadow_query_buffer->add_batched_queries(std::move(query_list), key, data, parent->emb_dim, nq);
     } else {
         query_buffer->add_batched_queries(std::move(query_list), key, data, parent->emb_dim, nq);
     }
-    // // 3. notify the search thread to process the queries
-    // if (!running_search_flag.load()) {
-    //     use_shadow_flag.fetch_xor(true); 
-    // }
     query_buffer_cv.notify_one();
 }
 
