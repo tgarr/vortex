@@ -5,7 +5,7 @@ import os
 from collections import defaultdict
 
 EMBEDDINGS_LOC = './gist'
-NCENTROIDS = 15
+NCENTROIDS = 3
 
 def fvecs_read(filename, dtype=np.float32, c_contiguous=True):
     fv = np.fromfile(filename, dtype=dtype)

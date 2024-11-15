@@ -73,6 +73,10 @@ public:
     }
 
 
+    /***
+     * Run ANN algorithm on the query and emit the results
+     * TODO: this function is currrently blocking. Decrease the time it holds the lock
+     */
     void search_and_emit(DefaultCascadeContextType* typed_ctxt) {
         while (execution_thread_running) {
             std::unique_lock<std::shared_mutex> map_lock(cluster_search_index_map_mutex);
@@ -114,11 +118,9 @@ public:
                         obj.key = std::string(EMIT_AGGREGATE_PREFIX) + "/" + new_keys[k];
                         std::string query_emit_content = serialize_cluster_search_result(top_k, I, D, k, query_list[k]);
                         obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
                         int client_id = -1, query_batch_id = -1;
                         parse_batch_id(obj.key, client_id, query_batch_id);
                         TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,client_id,query_batch_id,cluster_id);
-#endif
                         typed_ctxt->get_service_client_ref().put_and_forget(obj);
                     }
 

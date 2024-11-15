@@ -5,7 +5,7 @@
 #include <iostream>
 #include <unistd.h>  
 #include <vector>
-#include "../vortex_udls/rag_utils.hpp"
+#include "../vortex_udls/serialize_utils.hpp"
 
 using namespace derecho::cascade;
 // #define EMBEDDING_DIM 1024
@@ -15,6 +15,14 @@ using namespace derecho::cascade;
 #define QUERY_FILENAME "query.csv"
 #define QUERY_EMB_FILENAME "query_emb.csv"
 #define GROUNDTRUTH_FILENAME "groundtruth.csv"
+
+
+struct queryResult{
+     std::string query_text;
+     std::vector<std::string> top_k_docs;
+     uint32_t query_batch_id;
+     std::string llm_response;
+};
 
 
 inline bool is_in_topk(const std::vector<std::string>& groundtruth, const std::string& target, int k) {
@@ -31,6 +39,8 @@ class VortexPerfClient{
      // int query_interval = 100000; // default interval between query is 1 second
      int query_interval = 50000;
      int embedding_dim = 1024;
+     bool use_local_embeddings = true;
+     bool only_send_query_text = false;
 
      // Use vector since one query may be reuse for multiple times among different batches. 
      // sent_queries: query_text -> [(batch_id,query_id), ...]
@@ -42,16 +52,17 @@ class VortexPerfClient{
      std::atomic<int> num_queries_to_send;
 
 public:
-     VortexPerfClient(int node_id, int num_queries, int batch_size, int query_interval, int emb_dim);
+     VortexPerfClient(int node_id, int num_queries, int batch_size, int query_interval, int emb_dim, bool only_send_query_text);
 
      int read_queries(std::filesystem::path query_filepath, std::vector<std::string>& queries);
      int read_query_embs(std::string query_emb_directory, std::unique_ptr<float[]>& query_embs);
-     std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list);
+     bool prepare_queries(const std::string& query_directory, std::vector<std::string>& queries, std::unique_ptr<float[]>& query_embs);
+
 
      /***
      * Result JSON is in format of : {"query": query_text, "top_k_docs":[doc_text1, doc_text2, ...], "query_batch_id": query_batch_id}
      */
-     bool deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs,uint32_t& query_batch_id);
+     bool deserialize_result(const Blob& blob, std::vector<queryResult>& query_results);
      
      /***
       * Register notification to all servers, helper function to run_perf_test
@@ -63,7 +74,7 @@ public:
      /***
       * Run perf test
       */
-     bool run_perf_test(ServiceClientAPI& capi, std::string& query_directory);
+     bool run_perf_test(ServiceClientAPI& capi,const std::vector<std::string>& queries,const std::unique_ptr<float[]>& query_embs);
 
      bool flush_logs(ServiceClientAPI& capi, int num_shards);
 

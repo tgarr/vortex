@@ -6,6 +6,9 @@
 #define QUERY_BATCH_ID_MODULUS 100000
 #define CLUSTER_KEY_DELIMITER "_cluster"
 
+
+std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list, uint32_t embedding_dim);
+
 /***
 * Helper function for logging purpose, to extract the query information from the key
 * @param key_string the key string to extract the query information from

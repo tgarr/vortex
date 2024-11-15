@@ -1,7 +1,10 @@
 #include "vortex_client.hpp"
 
-VortexPerfClient::VortexPerfClient(int node_id, int num_queries, int batch_size, int query_interval, int emb_dim): 
-               my_node_id(node_id), num_queries(num_queries), batch_size(batch_size), query_interval(query_interval), embedding_dim(emb_dim) {
+VortexPerfClient::VortexPerfClient(int node_id, int num_queries, int batch_size, 
+                                   int query_interval, int emb_dim, bool only_send_query_text): 
+                                   my_node_id(node_id), num_queries(num_queries), 
+                                   batch_size(batch_size), query_interval(query_interval), 
+                                   embedding_dim(emb_dim), only_send_query_text(only_send_query_text) {
      this->running.store(true);
      this->num_queries_to_send.store(this->num_queries*this->batch_size);
 }
@@ -65,23 +68,40 @@ int VortexPerfClient::read_query_embs(std::string query_emb_directory, std::uniq
      return num_query_collected;
 }
 
-std::string VortexPerfClient::format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list) {
-     // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
-     uint32_t num_queries = static_cast<uint32_t>(nq);
-     std::string nq_bytes(4, '\0');
-     nq_bytes[0] = (num_queries >> 24) & 0xFF;
-     nq_bytes[1] = (num_queries >> 16) & 0xFF;
-     nq_bytes[2] = (num_queries >> 8) & 0xFF;
-     nq_bytes[3] = num_queries & 0xFF;
-     float* query_embeddings = xq.get();
-     // serialize the query embeddings and query texts, formated as num_queries + query_embeddings + query_texts
-     std::string query_emb_string = nq_bytes +
-                              std::string(reinterpret_cast<const char*>(query_embeddings), sizeof(float) * this->embedding_dim * num_queries) +
-                              nlohmann::json(query_list).dump();
-     return query_emb_string;
+/** TODO: quite some copies in this process, not on critical path, but could be optimized. */
+bool VortexPerfClient::prepare_queries(const std::string& query_directory, std::vector<std::string>& queries, std::unique_ptr<float[]>& query_embs){
+     std::filesystem::path query_pathname = std::filesystem::path(query_directory) / QUERY_FILENAME;
+     int num_query_collected = read_queries(query_pathname, queries);
+     if (queries.size() == 0) {
+          std::cerr << "Error: failed to read queries from " << query_directory << std::endl;
+          return false;
+     }
+
+     if (this->only_send_query_text) {
+          return true;
+     }
+     std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
+     int num_emb_collected = read_query_embs(query_emb_pathname, query_embs);
+     // resize query or query_embs to make sure they correspond, i.e. have the same number of queries
+     if (num_query_collected > num_emb_collected){ // truncate query_vector to match the number of query embeddings
+          queries.resize(num_query_collected);
+          num_query_collected = num_emb_collected;
+     } else if (num_emb_collected > num_query_collected) { // truncate query_embs to match the number of queries
+          std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(this->embedding_dim * num_query_collected);
+          std::memcpy(new_embs.get(), query_embs.get(), this->embedding_dim * num_emb_collected * sizeof(float));
+          query_embs = std::move(new_embs);
+          num_emb_collected = num_query_collected;
+     }
+     if (num_query_collected < this->batch_size){
+          std::cerr << "Error: total number of queries in the dataset are not large enough for the batch size." << std::endl;
+          return false;
+     }
+     return true;
 }
 
-bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_text, std::vector<std::string>& top_k_docs,uint32_t& query_batch_id) {
+
+
+bool VortexPerfClient::deserialize_result(const Blob& blob, std::vector<queryResult>& query_results) {
      if (blob.size == 0) {
           std::cerr << "Error: empty result blob." << std::endl;
           return false;
@@ -91,14 +111,27 @@ bool VortexPerfClient::deserialize_result(const Blob& blob, std::string& query_t
      std::string json_string(json_data, json_size);
      try{
           nlohmann::json parsed_json = nlohmann::json::parse(json_string);
-          if (parsed_json.count("query") == 0 || parsed_json.count("top_k_docs") == 0) {
-               std::cerr << "Result JSON does not contain query or top_k_docs." << std::endl;
+          if (!parsed_json.is_array()) {
+               std::cerr << "Expected JSON array." << std::endl;
                return false;
           }
-          query_text = parsed_json["query"];
-          top_k_docs = parsed_json["top_k_docs"];
-          query_batch_id = parsed_json["query_batch_id"];
-
+          query_results.reserve(parsed_json.size());
+          for (const auto& item : parsed_json) {
+               if (!item.is_object()) {
+                    std::cerr << "Expected JSON object in array." << std::endl;
+                    continue;
+               }
+               queryResult qr;
+               qr.query_text = item["query"];
+               qr.query_batch_id = item["query_batch_id"];
+               if (item.contains("top_k_docs")) {
+                    qr.top_k_docs = item["top_k_docs"].get<std::vector<std::string>>();
+               }
+               if (item.contains("response")) {
+                    qr.llm_response = item["response"];
+               }
+               query_results.push_back(std::move(qr));
+          }
      } catch (const nlohmann::json::parse_error& e) {
           std::cerr << "Result JSON parse error: " << e.what() << std::endl;
           return false;
@@ -117,32 +150,30 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
      // 1.2. Register notification for this object pool
      bool ret = capi.register_notification_handler(
                [&](const Blob& result){
-                    std::string query_text;
-                    std::vector<std::string> top_k_docs;
-                    uint32_t query_batch_id;
-                    if (!deserialize_result(result, query_text, top_k_docs, query_batch_id)) {
+                    std::vector<queryResult> query_results;
+                    if (!deserialize_result(result, query_results)) {
                          std::cerr << "Error: failed to deserialize the result from the notification." << std::endl;
                          return false;
                     }
-                    if (this->query_results.find(query_text) == this->query_results.end()) {
-                         this->query_results[query_text] = top_k_docs;
-                    }
-                    if (this->sent_queries.find(query_text) != this->sent_queries.end()) {
-                         auto& tuple_vector = this->sent_queries[query_text];
-                         if (!tuple_vector.empty()) {
-                              auto first_tuple = tuple_vector.front();       
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
-                         TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,this->my_node_id,std::get<0>(first_tuple),std::get<1>(first_tuple));
-#endif
-                              // std::cout << "Received result for query: " << query_text << " from client: " << this->my_node_id << " batch_id: " << batch_id << " q_id: " << q_id << std::endl;
-                              // remove batch_id from this->sent_queries
-                              tuple_vector.erase(tuple_vector.begin());
-                              if (tuple_vector.empty()) {
-                                   this->sent_queries.erase(query_text);
-                              }
+                    for (const auto& qr : query_results) {
+                         if (this->query_results.find(qr.query_text) == this->query_results.end()) {
+                              this->query_results[qr.query_text] = qr.top_k_docs;
                          }
-                    } else {
-                         std::cerr << "Error: received result for query that is not sent." << std::endl;
+                         if (this->sent_queries.find(qr.query_text) != this->sent_queries.end()) {
+                              auto& tuple_vector = this->sent_queries[qr.query_text];
+                              if (!tuple_vector.empty()) {
+                                   auto first_tuple = tuple_vector.front();
+                                   TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,this->my_node_id,std::get<0>(first_tuple),std::get<1>(first_tuple));
+                                   // std::cout << "Received result for query: " << qr.query_text << " from client: " << this->my_node_id << " batch_id: " << std::get<0>(first_tuple) << " q_id: " << std::get<1>(first_tuple) << std::endl;
+                                   // remove batch_id from this->sent_queries
+                                   tuple_vector.erase(tuple_vector.begin());
+                                   if (tuple_vector.empty()) {
+                                        this->sent_queries.erase(qr.query_text);
+                                   }
+                              }
+                         } else {
+                              std::cerr << "Error: received result for query that is not sent." << std::endl;
+                         }
                     }
                     if (this->sent_queries.size() == 0 && num_queries_to_send.load() == 0) {
                          this->running = false;
@@ -172,44 +203,16 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
      return num_shards;
 }
 
-bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_directory){
-     // 1. Prepare the query and query embeddings
-     /** TODO: quite some copies in this process, not on critical path, but could be optimized. */
-     std::filesystem::path query_pathname = std::filesystem::path(query_directory) / QUERY_FILENAME;
-     std::vector<std::string> queries;
-     int num_query_collected = read_queries(query_pathname, queries);
-     if (queries.size() == 0) {
-          std::cerr << "Error: failed to read queries from " << query_directory << std::endl;
-          return false;
-     }
-
-     std::filesystem::path query_emb_pathname = std::filesystem::path(query_directory) / QUERY_EMB_FILENAME;
-     std::unique_ptr<float[]> query_embs;
-     int num_emb_collected = read_query_embs(query_emb_pathname, query_embs);
-     // resize query or query_embs to make sure they correspond, i.e. have the same number of queries
-     if (num_query_collected > num_emb_collected){ // truncate query_vector to match the number of query embeddings
-          queries.resize(num_query_collected);
-          num_query_collected = num_emb_collected;
-     } else if (num_emb_collected > num_query_collected) { // truncate query_embs to match the number of queries
-          std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(this->embedding_dim * num_query_collected);
-          std::memcpy(new_embs.get(), query_embs.get(), this->embedding_dim * num_emb_collected * sizeof(float));
-          query_embs = std::move(new_embs);
-          num_emb_collected = num_query_collected;
-     }
-     if (num_query_collected < this->batch_size){
-          std::cerr << "Error: total number of queries in the dataset are not large enough for the batch size." << std::endl;
-          return false;
-     }
-
-     // 2. send the queries to the cascade
+bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi,const std::vector<std::string>& queries, const std::unique_ptr<float[]>& query_embs){
+     // 1. send the queries to the cascade
      for (int batch_id = 0; batch_id < this->num_queries; batch_id++) {
           std::string key = "/rag/emb/centroids_search/client" + std::to_string(this->my_node_id) + "/qb" + std::to_string(batch_id);
-          // 2.1. Prepare the query texts
+          // 1.1. Prepare the query texts
           std::vector<std::string> cur_query_list;
           std::vector<int> cur_query_ids;
           int qb_start_loc = batch_id * this->batch_size;
           for (int j = 0; j < this->batch_size; ++j) {
-               int pos = (qb_start_loc + j) % num_query_collected;
+               int pos = (qb_start_loc + j) % (queries.size());
               cur_query_list.push_back(queries[pos]);
               cur_query_ids.push_back(pos);
               if (this->sent_queries.find(queries[pos]) == this->sent_queries.end()) {
@@ -217,31 +220,33 @@ bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_
               }
               this->sent_queries[queries[pos]].push_back(std::make_tuple((uint32_t)batch_id, (uint32_t)j));
           }
-          // 2.2. Prepare query embeddings
-          std::unique_ptr<float[]> query_embeddings(new float[this->embedding_dim * this->batch_size]);
-          for (int j = 0; j < this->batch_size; ++j) {
-               int pos = (qb_start_loc + j) % num_emb_collected;
-               for (int k = 0; k < this->embedding_dim; ++k) {
-                    query_embeddings[j * this->embedding_dim + k] = query_embs[pos * this->embedding_dim + k];
+          std::string emb_query_string;
+          // 1.2. Prepare query object
+          if (this->only_send_query_text){
+               nlohmann::json query_texts_json(cur_query_list);
+               emb_query_string = query_texts_json.dump();
+          } else {
+               std::unique_ptr<float[]> query_embeddings(new float[this->embedding_dim * this->batch_size]);
+               for (int j = 0; j < this->batch_size; ++j) {
+                    int pos = (qb_start_loc + j) % (queries.size());
+                    for (int k = 0; k < this->embedding_dim; ++k) {
+                         query_embeddings[j * this->embedding_dim + k] = query_embs[pos * this->embedding_dim + k];
+                    }
                }
+               // 1.3. format the query 
+               emb_query_string = format_query_emb_object(this->batch_size, query_embeddings, cur_query_list, this->embedding_dim);
           }
-          // 2.3. format the query 
-          std::string emb_query_string = format_query_emb_object(this->batch_size, query_embeddings, cur_query_list);
           ObjectWithStringKey emb_query_obj;
           emb_query_obj.key = key;
           emb_query_obj.blob = Blob(reinterpret_cast<const uint8_t*>(emb_query_string.c_str()), emb_query_string.size());
-          // 2.4. send the object to the cascade
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
+          // 1.4. send the object to the cascade
           for (int j = 0; j < this->batch_size; ++j) {
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,this->my_node_id,batch_id,j);
           }
-#endif
           capi.put_and_forget(emb_query_obj, false); // not only trigger the UDL, but also update state. TODO: Need more thinking here. 
-#ifdef ENABLE_VORTEX_EVALUATION_LOGGING
           for (int j = 0; j < this->batch_size; ++j) {
                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,this->my_node_id,batch_id,j);
           }
-#endif
           num_queries_to_send -= this->batch_size;
           std::this_thread::sleep_for(std::chrono::microseconds(this->query_interval)); // TODO
           if (batch_id % 200 == 0) {
@@ -250,6 +255,8 @@ bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi, std::string& query_
      }
      
      std::cout << "Put all queries to cascade." << std::endl;
+
+     // 2. wait for all results to be received
      while (this->running.load()) {
           std::this_thread::sleep_for(std::chrono::microseconds(this->query_interval/100));
      }
@@ -298,31 +305,36 @@ std::vector<std::vector<std::string>> VortexPerfClient::read_groundtruth(std::fi
 
 
 bool VortexPerfClient::compute_recall(ServiceClientAPI& capi, std::string& query_directory){
-     std::filesystem::path groundtruth_pathname = std::filesystem::path(query_directory) / GROUNDTRUTH_FILENAME;
-     std::vector<std::vector<std::string>> groundtruth = read_groundtruth(groundtruth_pathname);
-     double total_recall = 0.0;
-     // double recalls[this->num_queries];
-     for (const auto& [query, results] : this->query_results) {
-          uint query_index = stoi(query.substr(query.find_last_of(' ') + 1));
-          if (query_index >= groundtruth.size()) {
-               std::cerr << "Error: query index out of range." << std::endl;
-               return false;
-          }
-          uint topk = results.size();
-          uint found = 0;
-          const auto& query_grondtruth = groundtruth[query_index];
-          for (const auto& result : results) {
-               std::string doc_index = result.substr(result.find_last_of('/') + 1); // index are written as string
-               if (is_in_topk(query_grondtruth, doc_index, topk)) {
-                    found++;
+     try{
+          std::filesystem::path groundtruth_pathname = std::filesystem::path(query_directory) / GROUNDTRUTH_FILENAME;
+          std::vector<std::vector<std::string>> groundtruth = read_groundtruth(groundtruth_pathname);
+          double total_recall = 0.0;
+          // double recalls[this->num_queries];
+          for (const auto& [query, results] : this->query_results) {
+               uint query_index = stoi(query.substr(query.find_last_of(' ') + 1));
+               if (query_index >= groundtruth.size()) {
+                    std::cerr << "Error: query index out of range." << std::endl;
+                    return false;
                }
+               uint topk = results.size();
+               uint found = 0;
+               const auto& query_grondtruth = groundtruth[query_index];
+               for (const auto& result : results) {
+                    std::string doc_index = result.substr(result.find_last_of('/') + 1); // index are written as string
+                    if (is_in_topk(query_grondtruth, doc_index, topk)) {
+                         found++;
+                    }
+               }
+               total_recall += static_cast<double>(found) / topk;
+               // recalls[query_index] = static_cast<double>(found) / topk;
           }
-          total_recall += static_cast<double>(found) / topk;
-          // recalls[query_index] = static_cast<double>(found) / topk;
+          double avg_recall = total_recall / (this->num_queries*this->batch_size);
+          std::cout << "Avg Recall: " << avg_recall << std::endl;
+          std::cout << "------------------------" << std::endl;
+          // Could write out recalls to a file
+          return true;
+     } catch (const std::exception& e) {
+          std::cerr << "Error: failed to compute recall: " << e.what() << std::endl;
+          return false;
      }
-     double avg_recall = total_recall / (this->num_queries*this->batch_size);
-     std::cout << "Avg Recall: " << avg_recall << std::endl;
-     std::cout << "------------------------" << std::endl;
-     // Could write out recalls to a file
-     return true;
 }
