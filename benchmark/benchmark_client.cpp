@@ -133,23 +133,30 @@ void VortexBenchmarkClient::dump_timestamps(bool dump_remote){
     }
 }
 
-void VortexBenchmarkClient::result_received(nlohmann::json &result_json){
-    uint64_t batch_id = (int)result_json["query_batch_id"] / QUERY_BATCH_ID_MODULUS; // TODO this is weird: we should use a global unique identifier for each individual query
-    std::string query_text(std::move(result_json["query"]));
+void VortexBenchmarkClient::result_received(nlohmann::json &all_results_json){
+    for (const auto& result_json : all_results_json) {
+        if (result_json.count("query") == 0 || result_json.count("top_k_docs") == 0) {
+            std::cerr << "Result JSON does not contain query or top_k_docs." << std::endl;
+            continue;
+        }
 
-    std::shared_lock<std::shared_mutex> lock(client_thread->map_mutex);
-    auto index_and_id = client_thread->batched_query_to_index_and_id[batch_id][query_text];
-    lock.unlock();
+        uint64_t batch_id = (int)result_json["query_batch_id"] / QUERY_BATCH_ID_MODULUS; // TODO this is weird: we should use a global unique identifier for each individual query
+        std::string query_text(std::move(result_json["query"]));
 
-    uint64_t query_index = index_and_id.first;
-    query_id_t query_id = index_and_id.second;
+        std::shared_lock<std::shared_mutex> lock(client_thread->map_mutex);
+        auto index_and_id = client_thread->batched_query_to_index_and_id[batch_id][query_text];
+        lock.unlock();
 
-    std::unique_lock<std::shared_mutex> lock2(result_mutex);
-    result.emplace(query_id,std::move(result_json["top_k_docs"]));
-    lock2.unlock();
-    
-    TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,batch_id,query_index);
-    result_count++;
+        uint64_t query_index = index_and_id.first;
+        query_id_t query_id = index_and_id.second;
+
+        std::unique_lock<std::shared_mutex> lock2(result_mutex);
+        result.emplace(query_id,std::move(result_json["top_k_docs"]));
+        lock2.unlock();
+        
+        TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,batch_id,query_index);
+        result_count++;
+    }
 }
 
 const std::vector<std::string>& VortexBenchmarkClient::get_result(query_id_t query_id){
@@ -315,11 +322,6 @@ void VortexBenchmarkClient::NotificationThread::main_loop(){
 
         try{
              nlohmann::json parsed_json = nlohmann::json::parse(json_string);
-             if (parsed_json.count("query") == 0 || parsed_json.count("top_k_docs") == 0) {
-                  std::cerr << "Result JSON does not contain query or top_k_docs." << std::endl;
-                  continue;
-             }
-
              vortex->result_received(parsed_json);
         } catch (const nlohmann::json::parse_error& e) {
              std::cerr << "Result JSON parse error: " << e.what() << std::endl;
