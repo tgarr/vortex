@@ -18,6 +18,10 @@ find_package(Faiss REQUIRED)
 # Find CUDA Toolkit if using Faiss with GPU support
 find_package(CUDAToolkit REQUIRED)
 
+# Boost
+find_package(Boost REQUIRED COMPONENTS system filesystem)
+include_directories(${Boost_INCLUDE_DIRS})
+
 include(GNUInstallDirs)
 if (NOT DEFINED CMAKE_INSTALL_BINDIR)
     set(CMAKE_INSTALL_BINDIR bin)
@@ -59,6 +63,9 @@ target_compile_definitions(latency_client PRIVATE
     LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
     LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
 )
+
+add_executable(start_webservice webservice/start_webservice.cpp webservice/webservice.cpp webservice/vortex_webservice.cpp webservice/cascade_client.cpp)
+target_link_libraries(start_webservice ${Boost_LIBRARIES} derecho::cascade)
 
 set(UDL_COMMON_LIBS derecho derecho::cascade pthread faiss CUDA::cudart)
 
