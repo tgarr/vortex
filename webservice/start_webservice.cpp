@@ -8,6 +8,7 @@
 #define DEFAULT_DIMENSIONS 1024
 #define DEFAULT_NUM_RESULT_THREADS 1
 #define DEFAULT_IO_THREADS 1
+#define DEFAULT_ADDRESS "0.0.0.0"
 #define DEFAULT_PORT 8080
 
 void print_help(const std::string& bin_name){
@@ -19,6 +20,7 @@ void print_help(const std::string& bin_name){
     std::cout << " -u <batch_time_us>\t\tmaximum time to wait for the batch minimum size, in microseconds (default: " << DEFAULT_BATCH_TIME_US << ")" << std::endl;
     std::cout << " -t <num_result_threads>\tnumber of threads for processing results (default: " << DEFAULT_NUM_RESULT_THREADS << ")" << std::endl;
     std::cout << " -i <num_io_threads>\t\tnumber of threads for handling http requests (default: " << DEFAULT_IO_THREADS << ")" << std::endl;
+    std::cout << " -a <address>\t\t\tIP address to bind to (default: " << DEFAULT_ADDRESS << ")" << std::endl; 
     std::cout << " -p <port>\t\t\tport to listen at (default: " << DEFAULT_PORT << ")" << std::endl; 
     std::cout << " -h\t\t\t\tshow this help" << std::endl;
 }
@@ -31,9 +33,10 @@ int main(int argc, char** argv){
     uint64_t emb_dim = DEFAULT_DIMENSIONS;
     uint64_t num_result_threads = DEFAULT_NUM_RESULT_THREADS;
     int num_io_threads = DEFAULT_IO_THREADS;
+    std::string address = DEFAULT_ADDRESS;
     unsigned short port = DEFAULT_PORT;
 
-    while ((c = getopt(argc, argv, "e:b:x:u:t:i:p:h")) != -1){
+    while ((c = getopt(argc, argv, "e:b:x:u:t:i:a:p:h")) != -1){
         switch(c){
             case 'e':
                 emb_dim = strtoul(optarg,NULL,10);
@@ -53,6 +56,9 @@ int main(int argc, char** argv){
             case 'i':
                 num_io_threads = strtoul(optarg,NULL,10);
                 break;
+            case 'a':
+                address = optarg;
+                break;
             case 'p':
                 port = strtoul(optarg,NULL,10);
                 break;
@@ -71,9 +77,10 @@ int main(int argc, char** argv){
     std::cout << "  batch_time_us = " << batch_time_us << std::endl;
     std::cout << "  num_result_threads = " << num_result_threads << std::endl;
     std::cout << "  num_io_threads = " << num_io_threads << std::endl;
+    std::cout << "  address = " << address << std::endl;
     std::cout << "  port = " << port << std::endl;
 
-    VortexWebService vortex(emb_dim,batch_min_size,batch_max_size,batch_time_us,num_result_threads,num_io_threads,port);
+    VortexWebService vortex(emb_dim,batch_min_size,batch_max_size,batch_time_us,num_result_threads,num_io_threads,address,port);
     vortex.run();
     return 0;
 }
