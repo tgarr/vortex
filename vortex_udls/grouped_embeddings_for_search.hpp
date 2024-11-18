@@ -18,6 +18,7 @@
 #include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/gpu/StandardGpuResources.h>
+#include <hnswlib/hnswlib.h>
 
 #include "serialize_utils.hpp"
 
@@ -29,9 +30,22 @@ namespace cascade{
 class GroupedEmbeddingsForSearch{
 // Class to store group of embeddings, which could be the embeddings of a cluster or embeddings of all centroids
 public:
-     int faiss_search_type; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
+     enum class SearchType {
+          FaissCpuFlatSearch = 0,
+          FaissGpuFlatSearch = 1,
+          FaissGpuIvfSearch = 2,
+          HnswlibCpuSearch = 3
+     };
+
+     SearchType search_type; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
      int emb_dim;  //  e.g. 512. The dimension of each embedding
      int num_embs;  //  e.g. 1000. The number of embeddings in the array
+
+     // hnsw hyperparamters: a little jank, modify here
+     // hnswlib looks at these parameters to figure out which prebuilt index to load.
+     const int M = 32;
+     const int EF_CONSTRUCTION = 48;
+     const int EF_SEARCH = 200;
 
      float* embeddings; 
      std::atomic<bool> initialized_index; // Whether the index has been built
@@ -40,6 +54,8 @@ public:
      std::unique_ptr<faiss::gpu::StandardGpuResources> gpu_res;  // FAISS GPU resources. Initialize if use GPU search
      std::unique_ptr<faiss::gpu::GpuIndexFlatL2> gpu_flatl2_index; // FAISS index object. Initialize if use GPU Flat search
      std::unique_ptr<faiss::gpu::GpuIndexIVFFlat> gpu_ivf_flatl2_index; // FAISS index object. Initialize if use GPU IVF search
+     std::unique_ptr<hnswlib::HierarchicalNSW<float>> cpu_hnsw_index; // HNSWLIB index object. Initialize if use hnswlib cpu search 
+     std::unique_ptr<hnswlib::L2Space> l2_space;
 
      std::vector<std::string> query_texts; // query texts list
      std::vector<std::string> query_keys; // query key list 1-1 correspondence with query_texts
@@ -54,13 +70,13 @@ public:
 
 
      GroupedEmbeddingsForSearch(int type, int dim) 
-          : faiss_search_type(type), emb_dim(dim), num_embs(0), embeddings(nullptr),added_query_offset(0), query_embs_in_search(false) {
+          : search_type(static_cast<SearchType>(type)), emb_dim(dim), num_embs(0), embeddings(nullptr),added_query_offset(0), query_embs_in_search(false) {
           query_embs = new float[dim * MAX_NUM_QUERIES_PER_BATCH];
           initialized_index.store(false);
      }
 
      GroupedEmbeddingsForSearch(int dim, int num, float* data) 
-          : faiss_search_type(0), emb_dim(dim), num_embs(num), embeddings(data), added_query_offset(0), query_embs_in_search(false) {
+          : search_type(SearchType::FaissCpuFlatSearch), emb_dim(dim), num_embs(num), embeddings(data), added_query_offset(0), query_embs_in_search(false) {
           query_embs = new float[dim * MAX_NUM_QUERIES_PER_BATCH];
           initialized_index.store(false);
      }
@@ -185,13 +201,20 @@ public:
      }   
 
      int initialize_groupped_embeddings_for_search(){
-          if (this->faiss_search_type == 0){
+          switch (this->search_type) {
+          case SearchType::FaissCpuFlatSearch:
                initialize_cpu_flat_search();
-          } else if (this->faiss_search_type == 1){
+               break;
+          case SearchType::FaissGpuFlatSearch:
                initialize_gpu_flat_search();
-          } else if (this->faiss_search_type == 2){
+               break;
+          case SearchType::FaissGpuIvfSearch:
                initialize_gpu_ivf_flat_search();
-          } else {
+               break;
+          case SearchType::HnswlibCpuSearch:
+               initialize_cpu_hnsw_search();
+               break;
+          default:
                std::cerr << "Error: faiss_search_type not supported" << std::endl;
                dbg_default_error("Failed to initialize faiss search type, at clusters_search_udl.");
                return -1;
@@ -283,18 +306,54 @@ public:
       * @param I: index array to store the index of the top_k embeddings
       */
      void search(int nq, float* xq, int top_k, float* D, long* I){
-          if (this->faiss_search_type == 0){
+          switch (this->search_type) {
+          case SearchType::FaissCpuFlatSearch:
                faiss_cpu_flat_search(nq, xq, top_k, D, I);
-          } else if (this->faiss_search_type == 1){
+               break;
+          case SearchType::FaissGpuFlatSearch:
                faiss_gpu_flat_search(nq, xq, top_k, D, I);
-          } else if (this->faiss_search_type == 2){
+               break;
+          case SearchType::FaissGpuIvfSearch:
                faiss_gpu_ivf_flat_search(nq, xq, top_k, D, I);
-          } else {
+               break;
+          case SearchType::HnswlibCpuSearch:
+               hnsw_cpu_search(nq, xq, top_k, D, I);
+               break;
+          default:
                std::cerr << "Error: faiss_search_type not supported" << std::endl;
                dbg_default_error("Failed to search the top K embeddings, at clusters_search_udl.");
+               break;
           }
      }
 
+     void initialize_cpu_hnsw_search() {
+          this->l2_space = std::make_unique<hnswlib::L2Space>(this->emb_dim);
+          this->cpu_hnsw_index = std::make_unique<hnswlib::HierarchicalNSW<float>>(l2_space.get(), this->num_embs, M, EF_CONSTRUCTION);
+
+          for(size_t i = 0; i < this->num_embs; i++) {
+               this->cpu_hnsw_index->addPoint(this->embeddings + (i * this->emb_dim), i);
+          }
+     }
+     int hnsw_cpu_search(int nq, float* xq, int top_k, float* D, long* I)  {
+          for(size_t i = 0; i < nq; i++) {
+               const float* query_vector = xq + (i * this->emb_dim);
+
+               auto results = std::move(this->cpu_hnsw_index->searchKnn(query_vector, top_k));
+
+               for(size_t k = 0; k < top_k; k++) {
+                    auto [distance, idx] = results.top();
+                    results.pop();
+
+                    // populate distance vector which is (n, k)
+                    *(D + (i * top_k) + k) = distance;
+
+                    // populate index vector which is  also (n, k)
+                    *(I + (i * top_k) + k) = idx;
+               }
+          }
+
+          return 0;
+     }
      /*** 
       * Initialize the CPU flat search index based on the embeddings.
       * initalize it if use faiss_cpu_flat_search()
@@ -399,10 +458,11 @@ public:
                this->query_embs = nullptr;
           }
           // FAISS index cleanup 
-          if (this->faiss_search_type == 0 && this->cpu_flatl2_index != nullptr) {
+
+          if (this->search_type == SearchType::FaissCpuFlatSearch && this->cpu_flatl2_index != nullptr) {
                this->cpu_flatl2_index->reset();
           } 
-          else if (this->faiss_search_type == 1 && this->gpu_flatl2_index != nullptr) {
+          else if (this->search_type == SearchType::FaissGpuFlatSearch && this->gpu_flatl2_index != nullptr) {
                cudaError_t sync_err = cudaDeviceSynchronize();
                if (sync_err == cudaSuccess) {
                     this->gpu_flatl2_index->reset();  
@@ -410,13 +470,15 @@ public:
                     std::cerr << "Error during cudaDeviceSynchronize: " << cudaGetErrorString(sync_err) << std::endl;
                }
           } 
-          else if (this->faiss_search_type == 2 && this->gpu_ivf_flatl2_index != nullptr) {
+          else if (this->search_type == SearchType::FaissGpuIvfSearch && this->gpu_ivf_flatl2_index != nullptr) {
                cudaError_t sync_err = cudaDeviceSynchronize();
                if (sync_err == cudaSuccess) {
                     this->gpu_ivf_flatl2_index->reset();  
                } else {
                     std::cerr << "Error during cudaDeviceSynchronize: " << cudaGetErrorString(sync_err) << std::endl;
                }
+          } else if (this->search_type == SearchType::HnswlibCpuSearch && this -> cpu_flatl2_index != nullptr) {
+               this->cpu_hnsw_index.reset();
           }
      }
 
