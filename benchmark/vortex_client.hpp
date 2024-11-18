@@ -34,7 +34,7 @@ inline bool is_in_topk(const std::vector<std::string>& groundtruth, const std::s
 class VortexPerfClient{
      int my_node_id;
 
-     int num_queries = 0;
+     int num_batches = 0;
      int batch_size = 0;
      // int query_interval = 100000; // default interval between query is 1 second
      int query_interval = 50000;
@@ -52,7 +52,7 @@ class VortexPerfClient{
      std::atomic<int> num_queries_to_send;
 
 public:
-     VortexPerfClient(int node_id, int num_queries, int batch_size, int query_interval, int emb_dim, bool only_send_query_text);
+     VortexPerfClient(int node_id, int num_batches, int batch_size, int query_interval, int emb_dim, bool only_send_query_text);
 
      int read_queries(std::filesystem::path query_filepath, std::vector<std::string>& queries);
      int read_query_embs(std::string query_emb_directory, std::unique_ptr<float[]>& query_embs);
