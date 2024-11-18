@@ -41,10 +41,10 @@ void VortexWebService::run(){
     };
     
     std::cout << "Starting to listen to requests ..." << std::endl;
-    auto const address = net::ip::make_address("0.0.0.0");
+    auto const net_address = net::ip::make_address(address);
     try {
         net::io_context ioc{num_io_threads};
-        auto listener = std::make_shared<Listener>(ioc, btcp::endpoint{address, port},request_handler);
+        auto listener = std::make_shared<Listener>(ioc, btcp::endpoint{net_address, port},request_handler);
         listener->run();
 
         // multi-threaded listening
