@@ -1,12 +1,12 @@
 #include "vortex_client.hpp"
 
-VortexPerfClient::VortexPerfClient(int node_id, int num_queries, int batch_size, 
+VortexPerfClient::VortexPerfClient(int node_id, int num_batches, int batch_size, 
                                    int query_interval, int emb_dim, bool only_send_query_text): 
-                                   my_node_id(node_id), num_queries(num_queries), 
+                                   my_node_id(node_id), num_batches(num_batches), 
                                    batch_size(batch_size), query_interval(query_interval), 
                                    embedding_dim(emb_dim), only_send_query_text(only_send_query_text) {
      this->running.store(true);
-     this->num_queries_to_send.store(this->num_queries*this->batch_size);
+     this->num_queries_to_send.store(this->num_batches*this->batch_size);
 }
 
 
@@ -20,7 +20,7 @@ int VortexPerfClient::read_queries(std::filesystem::path query_filepath, std::ve
      std::string line;
      int num_query_collected = 0;
      while (std::getline(file, line)) {
-          if (num_query_collected >= this->num_queries * this->batch_size) {
+          if (num_query_collected >= this->num_batches * this->batch_size) {
                break;
           }
           queries.push_back(line);
@@ -31,7 +31,7 @@ int VortexPerfClient::read_queries(std::filesystem::path query_filepath, std::ve
 }
 
 int VortexPerfClient::read_query_embs(std::string query_emb_directory, std::unique_ptr<float[]>& query_embs){
-     std::unique_ptr<float[]> embs = std::make_unique<float[]>(this->embedding_dim * this->num_queries * this->batch_size);
+     std::unique_ptr<float[]> embs = std::make_unique<float[]>(this->embedding_dim * this->num_batches * this->batch_size);
      std::ifstream file(query_emb_directory);
      if (!file.is_open()) {
           std::cerr << "Error: Could not open query directory:" << query_emb_directory << std::endl;
@@ -41,7 +41,7 @@ int VortexPerfClient::read_query_embs(std::string query_emb_directory, std::uniq
      std::string line;
      int num_query_collected = 0;
      while (std::getline(file, line)) {
-          if (num_query_collected >= this->num_queries * this->batch_size) {
+          if (num_query_collected >= this->num_batches * this->batch_size) {
                break;
           }
           std::istringstream ss(line);
@@ -59,7 +59,7 @@ int VortexPerfClient::read_query_embs(std::string query_emb_directory, std::uniq
      }
      file.close();
      // resize the embs array to the actual number of queries collected
-     if (num_query_collected < this->num_queries * this->batch_size) {
+     if (num_query_collected < this->num_batches * this->batch_size) {
           std::unique_ptr<float[]> new_embs = std::make_unique<float[]>(this->embedding_dim * num_query_collected);
           std::memcpy(new_embs.get(), embs.get(), this->embedding_dim * num_query_collected * sizeof(float));
           embs = std::move(new_embs);
@@ -205,9 +205,7 @@ int VortexPerfClient::register_notification_on_all_servers(ServiceClientAPI& cap
 
 bool VortexPerfClient::run_perf_test(ServiceClientAPI& capi,const std::vector<std::string>& queries, const std::unique_ptr<float[]>& query_embs){
      // 1. send the queries to the cascade
-     // minimum number of batches needed to reach at least this->num_queries queries.
-     int number_batches = (this->num_queries + this->batch_size - 1) / this->batch_size;
-     for (int batch_id = 0; batch_id < number_batches; batch_id++) {
+     for (int batch_id = 0; batch_id < this->num_batches; batch_id++) {
           std::string key = "/rag/emb/centroids_search/client" + std::to_string(this->my_node_id) + "/qb" + std::to_string(batch_id);
           // 1.1. Prepare the query texts
           std::vector<std::string> cur_query_list;
@@ -311,7 +309,6 @@ bool VortexPerfClient::compute_recall(ServiceClientAPI& capi, std::string& query
           std::filesystem::path groundtruth_pathname = std::filesystem::path(query_directory) / GROUNDTRUTH_FILENAME;
           std::vector<std::vector<std::string>> groundtruth = read_groundtruth(groundtruth_pathname);
           double total_recall = 0.0;
-          // double recalls[this->num_queries];
           for (const auto& [query, results] : this->query_results) {
                uint query_index = stoi(query.substr(query.find_last_of(' ') + 1));
                if (query_index >= groundtruth.size()) {
@@ -330,7 +327,7 @@ bool VortexPerfClient::compute_recall(ServiceClientAPI& capi, std::string& query
                total_recall += static_cast<double>(found) / topk;
                // recalls[query_index] = static_cast<double>(found) / topk;
           }
-          double avg_recall = total_recall / (this->num_queries*this->batch_size);
+          double avg_recall = total_recall / (this->num_batches*this->batch_size);
           std::cout << "Avg Recall: " << avg_recall << std::endl;
           std::cout << "------------------------" << std::endl;
           // Could write out recalls to a file

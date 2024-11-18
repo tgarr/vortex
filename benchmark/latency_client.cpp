@@ -6,7 +6,7 @@ using namespace derecho::cascade;
 
 int main(int argc, char** argv){
      int opt;
-     int num_queries = 0;
+     int num_batches = 0;
      int batch_size = 0;
      // int query_interval = 100000; // default interval between query is 1 second
      int query_interval = 50000;
@@ -17,7 +17,7 @@ int main(int argc, char** argv){
      while ((opt = getopt(argc, argv, "n:b:q:i:e:t")) != -1) {
           switch (opt) {
                case 'n':
-                    num_queries = std::atoi(optarg);  // Convert the argument to an integer
+                    num_batches = std::atoi(optarg);  // Convert the argument to an integer
                     break;
                case 'b':
                     batch_size = std::atoi(optarg);   // Convert the argument to an integer
@@ -35,15 +35,15 @@ int main(int argc, char** argv){
                     only_send_query_text = true;
                     break;
                case '?': // Unknown option or missing option argument
-                    std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_data_dir> -i <interval> -e <emb_dim> [-t] (if only send query text)" << std::endl;
+                    std::cerr << "Usage: " << argv[0] << " -n <number_of_batches> -b <batch_size> -q <query_data_dir> -i <interval> -e <emb_dim> [-t] (if only send query text)" << std::endl;
                     return 1;
                default:
                     break;
           }
      }
-     if (num_queries == 0 || batch_size == 0 || query_directory.empty()) {
+     if (num_batches == 0 || batch_size == 0 || query_directory.empty()) {
           std::cerr << "Error: Missing required options." << std::endl;
-          std::cerr << "Usage: " << argv[0] << " -n <number_of_queries> -b <batch_size> -q <query_dir.csv> -i <interval> -e <emb_dim> [-t] (if only send query text)" << std::endl;
+          std::cerr << "Usage: " << argv[0] << " -n <number_of_batches> -b <batch_size> -q <query_dir.csv> -i <interval> -e <emb_dim> [-t] (if only send query text)" << std::endl;
           return 1;
      }
      if (batch_size > MAX_NUM_EMB_PER_OBJ) {
@@ -51,12 +51,12 @@ int main(int argc, char** argv){
           return 1;
      }
 
-     std::cout << "Number of queries: " << num_queries << std::endl;
+     std::cout << "Number of batches: " << num_batches << std::endl;
      std::cout << "Batch size: " << batch_size << std::endl;
 
      auto& capi = ServiceClientAPI::get_service_client();
      int node_id = capi.get_my_id();
-     VortexPerfClient perf_client(node_id, num_queries, batch_size, query_interval, emb_dim, only_send_query_text);
+     VortexPerfClient perf_client(node_id, num_batches, batch_size, query_interval, emb_dim, only_send_query_text);
 
      // 1. Register notification on all servers
      int num_shards = perf_client.register_notification_on_all_servers(capi);
