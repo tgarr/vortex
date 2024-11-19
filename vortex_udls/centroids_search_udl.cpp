@@ -22,8 +22,9 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::join() {
 }
 
 void CentroidsSearchOCDPO::ProcessBatchedTasksThread::signal_stop() {
+    std::lock_guard<std::mutex> lock(parent->active_tasks_mutex); 
     running = false;
-    thread_signal.notify_all(); 
+    parent->active_tasks_cv.notify_all();
 }
 
 bool CentroidsSearchOCDPO::ProcessBatchedTasksThread::get_queries_and_emebddings(Blob* blob, 
@@ -263,6 +264,13 @@ void CentroidsSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, con
     }
     this->process_batched_tasks_thread = std::make_unique<ProcessBatchedTasksThread>(this->my_id, this);
     this->process_batched_tasks_thread->start(typed_ctxt);
+}
+
+void CentroidsSearchOCDPO::shutdown() {
+    if (process_batched_tasks_thread) {
+        process_batched_tasks_thread->signal_stop();
+        process_batched_tasks_thread->join();
+    }
 }
 
 

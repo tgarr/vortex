@@ -48,8 +48,6 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
             std::thread real_thread;
             
             bool running = false;
-            std::mutex thread_mtx;
-            std::condition_variable thread_signal;
 
             bool get_queries_and_emebddings(Blob* blob, 
                                     float*& data, uint32_t& nq, 
@@ -121,6 +119,8 @@ public:
     }
 
     void set_config(DefaultCascadeContextType* typed_ctxt, const nlohmann::json& config);
+
+    void shutdown();
 };
 
 std::shared_ptr<OffCriticalDataPathObserver> CentroidsSearchOCDPO::ocdpo_ptr;
@@ -137,7 +137,7 @@ std::shared_ptr<OffCriticalDataPathObserver> get_observer(
 }
 
 void release(ICascadeContext* ctxt) {
-    // nothing to release
+    std::static_pointer_cast<CentroidsSearchOCDPO>(CentroidsSearchOCDPO::get())->shutdown();
     return;
 }
 

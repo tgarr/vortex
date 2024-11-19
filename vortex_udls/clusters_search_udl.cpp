@@ -326,13 +326,13 @@ void ClustersSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, cons
 }
 
 void ClustersSearchOCDPO::shutdown() {
+    std::unique_lock<std::shared_mutex> lock(cluster_search_index_mutex);
+    // Clean up index resources
+    cluster_search_index->reset();  
     if (cluster_search_thread) {
         cluster_search_thread->signal_stop();
         cluster_search_thread->join();
     }
-    std::unique_lock<std::shared_mutex> lock(cluster_search_index_mutex);
-    // Clean up index resources
-    cluster_search_index->reset();
 }
 
 

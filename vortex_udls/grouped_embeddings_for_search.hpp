@@ -399,8 +399,7 @@ public:
      ***/
      int faiss_gpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
           dbg_default_trace("FAISS GPU flatl2 Search in [GroupedEmbeddingsForSearch] class" );
-          int k = top_k;
-          this->gpu_flatl2_index->search(nq, xq, k, D, I);
+          this->gpu_flatl2_index->search(nq, xq, top_k, D, I);
           return 0;
      }
 
@@ -412,6 +411,7 @@ public:
           int nlist = 100;
           this->gpu_res = std::make_unique<faiss::gpu::StandardGpuResources>();
           this->gpu_ivf_flatl2_index = std::make_unique<faiss::gpu::GpuIndexIVFFlat>(this->gpu_res.get(), this->emb_dim, nlist, faiss::METRIC_L2);
+          this->gpu_ivf_flatl2_index->train(this->num_embs, this->embeddings); // train on the embeddings
           this->gpu_ivf_flatl2_index->add(this->num_embs, this->embeddings); // add vectors to the index
      }
 
@@ -425,22 +425,8 @@ public:
       * @param I: index array to store the index of the top_k embeddings
      ***/
      int faiss_gpu_ivf_flat_search(int nq, float* xq, int top_k, float* D, long* I){
-          dbg_default_error("FAISS GPU ivf flatl2 Search in [GroupedEmbeddingsForSearch] class");
+          dbg_default_trace("FAISS GPU ivf Search in [GroupedEmbeddingsForSearch] class" );
           this->gpu_ivf_flatl2_index->search(nq, xq, top_k, D, I);
-          // print results
-          printf("I (5 first results)=\n");
-          for (int i = 0; i < 5; i++) {
-               for (int j = 0; j < top_k; j++)
-                    printf("%5ld ", I[i * top_k + j]);
-               printf("\n");
-          }
-
-          printf("I (5 last results)=\n");
-          for (int i = nq - 5; i < nq; i++) {
-               for (int j = 0; j < top_k; j++)
-                    printf("%5ld ", I[i * top_k + j]);
-               printf("\n");
-          }
           return 0;
      }
 
@@ -466,6 +452,10 @@ public:
                cudaError_t sync_err = cudaDeviceSynchronize();
                if (sync_err == cudaSuccess) {
                     this->gpu_flatl2_index->reset();  
+                    this->gpu_res.reset();
+                    this->gpu_flatl2_index=nullptr;
+                    this->gpu_res=nullptr;
+                    cudaDeviceReset();  
                } else {
                     std::cerr << "Error during cudaDeviceSynchronize: " << cudaGetErrorString(sync_err) << std::endl;
                }
@@ -474,6 +464,10 @@ public:
                cudaError_t sync_err = cudaDeviceSynchronize();
                if (sync_err == cudaSuccess) {
                     this->gpu_ivf_flatl2_index->reset();  
+                    this->gpu_res.reset();
+                    this->gpu_ivf_flatl2_index=nullptr;
+                    this->gpu_res=nullptr;
+                    cudaDeviceReset();  
                } else {
                     std::cerr << "Error during cudaDeviceSynchronize: " << cudaGetErrorString(sync_err) << std::endl;
                }
