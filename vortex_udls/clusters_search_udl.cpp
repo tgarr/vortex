@@ -129,7 +129,7 @@ bool ClustersSearchOCDPO::ClusterSearchWorker::check_and_retrieve_cluster_index(
 /***
 * Run ANN algorithm on the query and emit the results
 */
-void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(DefaultCascadeContextType* typed_ctxt, 
+void ClustersSearchOCDPO::ClusterSearchWorker::run_batched_cluster_search_and_emit(DefaultCascadeContextType* typed_ctxt, 
                                                                 queryQueue* query_buffer) {
     int nq = query_buffer->count_queries();
     long* I = new long[parent->top_k * nq];
@@ -157,12 +157,41 @@ void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(Defau
     delete[] D;
 }
 
+/***
+* Run hnsw algorithm on the query and emit the result one-by-one
+*/
+void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit_per_query(DefaultCascadeContextType* typed_ctxt, 
+                                                                queryQueue* query_buffer) {
+    int nq = query_buffer->count_queries();
+    std::vector<std::string> new_keys;
+    this->construct_new_keys(new_keys, query_buffer->query_keys, query_buffer->query_list);
+    for (int i = 0; i < nq; ++i) {
+        long* I = new long[parent->top_k];
+        float* D =  new float[parent->top_k];
+        parent->cluster_search_index->search(1, query_buffer->query_embs + i * parent->emb_dim, parent->top_k, D, I);
+        if (!I || !D) {
+            dbg_default_error("Failed to search for cluster: {}", this->cluster_id);
+            return;
+        }
+        ObjectWithStringKey obj;
+        obj.key = std::string(EMIT_AGGREGATE_PREFIX) + "/" + new_keys[i];
+        std::string query_emit_content = serialize_cluster_search_result(parent->top_k, I, D, 0, query_buffer->query_list[i]);
+        obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
+        int client_id = -1, query_batch_id = -1;
+        parse_batch_id(obj.key, client_id, query_batch_id);
+        TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START,client_id,query_batch_id, this->cluster_id);
+        typed_ctxt->get_service_client_ref().put_and_forget(obj);
+        delete[] I;
+        delete[] D;
+    }
+}
+
 // check pending queries, flip the shadow_flag if needed
 bool ClustersSearchOCDPO::ClusterSearchWorker::enough_pending_queries(int num){
     // flip the shadow buffer if the adding_buffer size exceeds the batch_min_size 
-    if (use_shadow_flag.load() && shadow_query_buffer->count_queries() > num) {
+    if (use_shadow_flag.load() && shadow_query_buffer->count_queries() >= num) {
         return true;
-    } else if (!use_shadow_flag.load() && query_buffer->count_queries() > num) {
+    } else if (!use_shadow_flag.load() && query_buffer->count_queries() >= num) {
         return true;
     }
     return false;
@@ -179,7 +208,7 @@ void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextTy
             return this->enough_pending_queries(parent->batch_min_size); ; 
         });
         if (!running) break;
-        if ( !this->enough_pending_queries(0)) {
+        if ( !this->enough_pending_queries(1)) {
             // if no queries in the buffer, then continue to wait for the next batch
             continue;
         }
@@ -203,7 +232,11 @@ void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextTy
         } else {
             cur_query_buffer = shadow_query_buffer.get();
         }
-        run_cluster_search_and_emit(typed_ctxt, cur_query_buffer);
+        if (static_cast<GroupedEmbeddingsForSearch::SearchType>(parent->faiss_search_type) == GroupedEmbeddingsForSearch::SearchType::HnswlibCpuSearch) {
+            run_cluster_search_and_emit_per_query(typed_ctxt, cur_query_buffer);
+        } else {
+            run_batched_cluster_search_and_emit(typed_ctxt, cur_query_buffer);
+        }
         // reset the current query buffer
         cur_query_buffer->reset();
         wait_start = std::chrono::steady_clock::now();
@@ -289,17 +322,17 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
     TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,client_id,query_batch_id,cluster_id);
     // 1. Move the object to the active queue to be processed
-    this->cluster_search_thread->push_to_query_buffer(cluster_id, object.blob, key_string);
-    dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue.", key_string );
+    uint64_t to_thread = query_batch_id % this->num_threads;
+    this->cluster_search_threads[to_thread]->push_to_query_buffer(cluster_id, object.blob, key_string);
+    dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue on thread{}.", key_string, to_thread);
 }
 
 
 void ClustersSearchOCDPO::start_threads(DefaultCascadeContextType* typed_ctxt) {
-    /*** TODO: this could be extended to thread-pool  */
-    if (!cluster_search_thread) {
-        uint64_t thread_id = 0;
-        cluster_search_thread = std::make_unique<ClusterSearchWorker>(thread_id, 
-                                this);
+    for (int thread_id = 0; thread_id < this->num_threads; thread_id++) {
+        cluster_search_threads.emplace_back(std::make_unique<ClusterSearchWorker>(static_cast<uint64_t>(thread_id), this));
+    }
+    for (auto& cluster_search_thread : cluster_search_threads) {
         cluster_search_thread->start(typed_ctxt);
     }
 }
@@ -317,6 +350,16 @@ void ClustersSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, cons
         if (config.contains("faiss_search_type")) {
             this->faiss_search_type = config["faiss_search_type"].get<int>();
         }
+        if (config.contains("batch_time_us")) {
+            this->batch_time_us = config["batch_time_us"].get<uint32_t>();
+        }
+        if (config.contains("batch_min_size")) {
+            this->batch_min_size = config["batch_min_size"].get<uint32_t>();
+        }
+        // Currenlty only support multithreading for hnswlib search, as GPU flat search requires cuda streams for host side parallelism
+        if (config.contains("num_threads") && static_cast<GroupedEmbeddingsForSearch::SearchType>(this->faiss_search_type) == GroupedEmbeddingsForSearch::SearchType::HnswlibCpuSearch) {
+            this->num_threads = config["num_threads"].get<int>();
+        }
     } catch (const std::exception& e) {
         std::cerr << "Error: failed to convert emb_dim or top_k from config" << std::endl;
         dbg_default_error("Failed to convert emb_dim or top_k from config, at clusters_search_udl.");
@@ -329,9 +372,11 @@ void ClustersSearchOCDPO::shutdown() {
     std::unique_lock<std::shared_mutex> lock(cluster_search_index_mutex);
     // Clean up index resources
     cluster_search_index->reset();  
-    if (cluster_search_thread) {
-        cluster_search_thread->signal_stop();
-        cluster_search_thread->join();
+    for (auto& cluster_search_thread : cluster_search_threads) {
+        if (cluster_search_thread) {
+            cluster_search_thread->signal_stop();
+            cluster_search_thread->join();
+        }
     }
 }
 
