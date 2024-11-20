@@ -162,7 +162,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
     if (parent->include_encoder && data) 
         delete[] data;
     // after using the batched task's blob data, release the memory
-    task_ptr->blob.memory_mode = derecho::cascade::object_memory_mode_t::DEFAULT;
+    // task_ptr->blob.memory_mode = derecho::cascade::object_memory_mode_t::DEFAULT;
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
     dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", task_ptr->key);
 }
@@ -229,13 +229,13 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_START,client_id,query_batch_id,this->my_id);
 
-    Blob blob = std::move(const_cast<Blob&>(object.blob));
-    blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED;
+    // Blob blob = std::move(const_cast<Blob&>(object.blob));
+    // blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED;
     // Append the batched queries task to the queue
     new_request = true;
     std::unique_lock<std::mutex> lock(active_tasks_mutex); 
 
-    active_tasks_queue.push(std::make_unique<batchedTask>(key_string, client_id, query_batch_id, std::move(blob)));
+    active_tasks_queue.push(std::make_unique<batchedTask>(key_string, client_id, query_batch_id, object.blob));
     new_request = false;
     lock.unlock();
     active_tasks_cv.notify_one();

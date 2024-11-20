@@ -31,8 +31,8 @@ struct batchedTask {
     // std::vector<std::string> queries;
     // // CURL *curl;
     // std::unique_ptr<float[]> all_embeddings;
-    batchedTask(std::string key, uint32_t client_id, uint32_t query_batch_id, Blob&& blob)
-        : key(key), client_id(client_id), query_batch_id(query_batch_id), blob(std::move(blob)) {}
+    batchedTask(std::string key, uint32_t client_id, uint32_t query_batch_id, Blob blob)
+        : key(key), client_id(client_id), query_batch_id(query_batch_id), blob(blob) {}
 };
 
 class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
