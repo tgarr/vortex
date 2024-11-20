@@ -83,7 +83,17 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         void construct_new_keys(std::vector<std::string>& new_keys,
                                                        const std::vector<std::string>& query_keys, 
                                                        const std::vector<std::string>& query_list);
-        void run_cluster_search_and_emit(DefaultCascadeContextType* typed_ctxt,
+        /***
+         * Run ANN algorithm on batch of queries from query_buffer and emit the results once the whole batch finishes
+         *  used for batchable search, which is more performant when the number of queries is large
+        */
+        void run_batched_cluster_search_and_emit(DefaultCascadeContextType* typed_ctxt,
+                                        queryQueue* query_buffer);
+        /***
+         * Run ANN algorithm on the queries from query_buffer and emit the result one-by-one
+         *  used when hnsw search is enabled, which is not batchable
+         */
+        void run_cluster_search_and_emit_per_query(DefaultCascadeContextType* typed_ctxt,
                                         queryQueue* query_buffer);
         /*** Helper function to check if there are enough pending queries on
          *   the buffer that have been added by the push_thread
@@ -110,8 +120,9 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     uint32_t top_k = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
     int my_id; // the node id of this node; logging purpose
-    uint32_t batch_time_us=1000; // the time interval to process the batch of queries
-    uint32_t batch_min_size=0; // min number queries to process in each batch
+    uint32_t batch_time_us = 1000; // the time interval to process the batch of queries
+    uint32_t batch_min_size = 1; // min number queries to process in each batch
+    int num_threads = 1; // number of threads to process the cluster search
 
     mutable std::shared_mutex cluster_search_index_mutex;
     mutable std::condition_variable_any cluster_search_index_cv;
@@ -131,7 +142,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
 public:
     /*** TODO: have a thread_pool for process cluster search workers */
-    std::unique_ptr<ClusterSearchWorker> cluster_search_thread;
+    std::vector<std::unique_ptr<ClusterSearchWorker>> cluster_search_threads;
 
     static void initialize() {
         if(!ocdpo_ptr) {
