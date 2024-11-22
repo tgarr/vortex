@@ -47,7 +47,8 @@ bool queryQueue::could_add_query_nums(uint32_t num_queries) {
     // This should be rare occurance, as it blocks the main thread. 
     // Increase the MAX_NUM_QUERIES_PER_BATCH if this happens, meaning the local cache is too small for the high query rate
     if (!has_space) {
-        dbg_default_error("Failed to add queries to the queue, not enough space. num_queries = {}", num_queries);
+        dbg_default_trace("Failed to add queries to the queue, not enough space. num_queries = {}", num_queries);
+        return false;
     }
     return has_space;
 }
