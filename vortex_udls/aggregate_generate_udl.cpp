@@ -4,20 +4,21 @@ namespace derecho {
 namespace cascade {
 
 
-QuerySearchResults::QuerySearchResults(const std::string& query_text, int total_cluster_num, int top_k) 
-    : query_text(query_text), total_cluster_num(total_cluster_num), top_k(top_k) {}
+QuerySearchResults::QuerySearchResults(const int& client_id, const int query_batch_id,
+                    const std::string& query_text, const int& total_cluster_num, const int& top_k) 
+    : client_id(client_id), query_batch_id(query_batch_id), query_text(query_text), 
+        total_cluster_num(total_cluster_num), top_k(top_k) {}
 
-bool QuerySearchResults::is_all_results_collected() {
+bool QuerySearchResults::clusters_results_all_received() {
     if(static_cast<int>(collected_cluster_ids.size()) == total_cluster_num){
-        collected_all_results = true;
+        return true;
     }
-    // print out the docIndex in the min heap for debugging
-    std::priority_queue<DocIndex> tmp = agg_top_k_results;
-    return collected_all_results;
+    return false;
 }
 
 void QuerySearchResults::add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results) {
     if(std::find(collected_cluster_ids.begin(), collected_cluster_ids.end(), cluster_id) != collected_cluster_ids.end()){
+        dbg_default_warn("AggGenOCDPO, receiving repeated cluster's result, from cluster{}",cluster_id);
         return;
     }
     this->collected_cluster_ids.push_back(cluster_id);
@@ -31,9 +32,6 @@ void QuerySearchResults::add_cluster_result(int cluster_id, std::vector<DocIndex
         }
     }
 }
-
-QueryRequestSource::QueryRequestSource(uint32_t client_id, uint32_t query_batch_id, uint32_t qid, int total_cluster_num, int received_cluster_result_count, bool notified_client)
-    : client_id(client_id), query_batch_id(query_batch_id), qid(qid), total_cluster_num(total_cluster_num), received_cluster_result_count(received_cluster_result_count), notified_client(notified_client) {}
 
 
 AggGenOCDPO::ProcessThread::ProcessThread(uint64_t thread_id, AggGenOCDPO* parent_udl)
@@ -61,51 +59,10 @@ void AggGenOCDPO::ProcessThread::push_task(std::unique_ptr<queuedTask> task) {
     thread_signal.notify_all();
 }
 
-
-
-bool AggGenOCDPO::ProcessThread::has_notified_client(const std::string& query_text, 
-                                                            const uint32_t& client_id, 
-                                                            const uint32_t& query_batch_id, 
-                                                            const uint32_t& qid) {
-    auto& tracked_query_request = query_request_tracker[query_text];
-    for (auto& q_source : tracked_query_request) {
-        if (q_source.client_id == client_id && q_source.query_batch_id == query_batch_id ) {
-            q_source.received_cluster_result_count += 1;
-            if (q_source.received_cluster_result_count > q_source.total_cluster_num) {
-                std::cerr << "Error: received_cluster_result_count" << q_source.received_cluster_result_count << ">total_cluster_num=" << q_source.total_cluster_num << std::endl;
-                assert (q_source.received_cluster_result_count <= q_source.total_cluster_num);
-            }
-            return q_source.notified_client;
-        }
-    }
-    query_request_tracker[query_text].emplace_back(client_id, query_batch_id, qid, parent->top_num_centroids, 1, false);
-    return false;
-}
-
-
-void AggGenOCDPO::ProcessThread::serialize_results_and_notify_client(DefaultCascadeContextType* typed_ctxt, 
-                                                                const std::vector<std::tuple<std::string, int, int>>& query_infos, 
-                                                                int client_id) {
-    // 1. convert the query and top_k_docs to a json object
-    nlohmann::json result_json = json::array();
-    for (const auto& query_info : query_infos) {
-        const std::string& query_text = std::get<0>(query_info);
-        const int& query_batch_id = std::get<1>(query_info);
-        const int& qid = std::get<2>(query_info);
-        nlohmann::json result;
-        result["query"] = query_text;
-        if (parent->include_llm) {
-            result["response"] = query_results[query_text]->api_result;
-        }else{
-            result["top_k_docs"] = query_results[query_text]->top_k_docs;
-        }
-        result["query_batch_id"] = query_batch_id; // logging purpose
-        result_json.push_back(result);
-        TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
-
-    }
-    // 2. notify the result to clients that send the same query
-    std::string result_json_str = result_json.dump();
+void AggGenOCDPO::ProcessThread::notify_client(DefaultCascadeContextType* typed_ctxt, 
+                                                std::string& result_json_str,
+                                                const int& client_id) {
+    
     Blob result_blob(reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
     try {
         std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
@@ -115,52 +72,60 @@ void AggGenOCDPO::ProcessThread::serialize_results_and_notify_client(DefaultCasc
         std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
         dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());
     }
-    // 3. (garbage collection) remove query and query_result from the cache
-    for (const auto& query_info : query_infos) {
-        const std::string& query_text = std::get<0>(query_info);
-        const int& query_batch_id = std::get<1>(query_info);
-        const int& qid = std::get<2>(query_info);
-        garbage_collect_query_results(query_text, client_id, query_batch_id, qid);
-        TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_END, client_id, query_batch_id, qid);
-    }
 }
 
-void AggGenOCDPO::ProcessThread::garbage_collect_query_results(const std::string& query_text, const uint32_t& client_id, const uint32_t& query_batch_id, const uint32_t& qid) {
-    auto& tracked_query_request = query_request_tracker[query_text];
-    for (auto it = tracked_query_request.begin(); it != tracked_query_request.end(); ++it) {
-        if (it->client_id == client_id && it->query_batch_id == query_batch_id && it->qid == qid) {
-            it->notified_client = true;
-            break;
-        } 
+std::string AggGenOCDPO::ProcessThread::serialize_results(const int& client_id,
+                                                        const std::vector<int>& result_ids, 
+                                                        size_t start, size_t end){
+    std::string result_json_str;
+    // convert the query and top_k_docs to a json object
+    nlohmann::json result_json = json::array();
+    for (size_t i = start; i <= end; i++) {
+        auto& query_result = this->query_results[client_id][result_ids[i]];
+        const int& query_batch_id = query_result->query_batch_id;
+        nlohmann::json result;
+        result["query"] = query_result->query_text;
+        result["top_k_docs"] = query_result->top_k_docs;
+        result["query_batch_id"] = query_batch_id; // logging purpose
+        result_json.push_back(result);
+
+        int qid = query_result->query_batch_id % QUERY_BATCH_ID_MODULUS;
+        TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
     }
-    /*** check if all the cluster search result of this query has been processed. 
-        * If not, keep the query in the tracker longer, because this UDL will be triggered again by the remaining cluster search DULs results,
-        * in which case, we would skip processing the query again.
-    */
-    bool all_finished = true;
-    for (const auto& query_tracker : tracked_query_request) {
-        if (!query_tracker.notified_client || query_tracker.received_cluster_result_count < query_tracker.total_cluster_num) {
-            all_finished = false;
-            break;
+    result_json_str = result_json.dump(); 
+    return result_json_str; // RVO
+}
+
+void AggGenOCDPO::ProcessThread::garbage_collect_query_results(std::map<int, std::vector<int>>& notified_results) {
+    for (auto& client_results : notified_results) {
+        for (auto& query_batch_id : client_results.second) {
+            query_results[client_results.first].erase(query_batch_id);
         }
     }
-    if (all_finished) {
-        query_results.erase(query_text);
-        query_request_tracker.erase(query_text);
+}
+
+
+void AggGenOCDPO::ProcessThread::notify_clients_in_batch(DefaultCascadeContextType* typed_ctxt, 
+                        std::map<int, std::vector<int>>& results_to_notify){
+    for (const auto& [client_id, client_results] : results_to_notify) {
+        size_t total_num_replies = client_results.size();
+        size_t start_index = 0;
+        size_t end_index;
+        while (start_index < total_num_replies) {
+            end_index = std::min(start_index + MAX_NUM_REPLIES_PER_NOTIFICATION_MESSAGE, total_num_replies) - 1;
+            std::string result_json_str = serialize_results(client_id, client_results, start_index, end_index);
+            notify_client(typed_ctxt, result_json_str, client_id);
+            start_index = end_index + 1;
+        }
     }
+    // garbage collect the query_results
+    garbage_collect_query_results(results_to_notify);
 }
 
-void AggGenOCDPO::ProcessThread::async_run_llm_with_top_k_docs(const std::string& query_text) {
-    auto& top_k_docs = query_results[query_text]->top_k_docs;
-    auto& api_key = parent->openai_api_key;
-    auto& model = parent->llm_model_name;
-    
-    query_api_futures[query_text] = std::async(std::launch::async, api_utils::run_gpt4o_mini, query_text, top_k_docs, model, api_key);
-}
-
-bool AggGenOCDPO::ProcessThread::get_topk_docs(DefaultCascadeContextType* typed_ctxt, std::string& query_text){
-    auto& agg_top_k_results = this->query_results[query_text]->agg_top_k_results;
-    auto& top_k_docs = this->query_results[query_text]->top_k_docs;
+bool AggGenOCDPO::ProcessThread::get_topk_docs(DefaultCascadeContextType* typed_ctxt, 
+                                            const int& client_id, const int& query_batch_id){
+    auto& agg_top_k_results = this->query_results[client_id][query_batch_id]->agg_top_k_results;
+    auto& top_k_docs = this->query_results[client_id][query_batch_id]->top_k_docs;
     top_k_docs.resize(agg_top_k_results.size());
     int i = agg_top_k_results.size();
     while (!agg_top_k_results.empty()) {
@@ -175,81 +140,48 @@ bool AggGenOCDPO::ProcessThread::get_topk_docs(DefaultCascadeContextType* typed_
         }
         top_k_docs[i] = std::move(res_doc);
     }
-    this->query_results[query_text]->retrieved_top_k_docs = true;
     return true;
 }
 
-bool AggGenOCDPO::ProcessThread::process_task(DefaultCascadeContextType* typed_ctxt, queuedTask* task_ptr){
-    if (query_results.find(task_ptr->query_text) == query_results.end()) {
-        query_results[task_ptr->query_text] = std::make_unique<QuerySearchResults>(task_ptr->query_text, parent->top_num_centroids, parent->top_k);
-        query_request_tracker[task_ptr->query_text] = std::vector<QueryRequestSource>();
-    } 
-    // if the request has already been sent to client, then skip sending it again
-    if (has_notified_client(task_ptr->query_text, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->qid)) {
-        // mark it as notified in the tracker for this cluster
-        garbage_collect_query_results(task_ptr->query_text, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->qid); 
-        return false;
+void AggGenOCDPO::ProcessThread::add_to_query_results(queuedTask* task_ptr) {
+    if (query_results.find(task_ptr->client_id) == query_results.end()) {
+        query_results[task_ptr->client_id] = std::unordered_map<int, std::unique_ptr<QuerySearchResults>>();
     }
-    // 2. add the cluster_results to the query_results and check if all results are collected
-    query_results[task_ptr->query_text]->add_cluster_result(task_ptr->cluster_id, task_ptr->cluster_results);
-    // 3. check if all cluster results are collected for this query
-    if (!query_results[task_ptr->query_text]->is_all_results_collected()) {
+    if (query_results[task_ptr->client_id].find(task_ptr->query_batch_id) == query_results[task_ptr->client_id].end()) {
+        query_results[task_ptr->client_id][task_ptr->query_batch_id] = std::make_unique<QuerySearchResults>(
+                                                                    task_ptr->client_id, task_ptr->query_batch_id,
+                                                                    task_ptr->query_text, parent->top_num_centroids, parent->top_k);
+    }
+    query_results[task_ptr->client_id][task_ptr->query_batch_id]->add_cluster_result(task_ptr->cluster_id, task_ptr->cluster_results);
+}
+
+
+bool AggGenOCDPO::ProcessThread::process_task(DefaultCascadeContextType* typed_ctxt, queuedTask* task_ptr){
+    // 1. add the cluster_results to the query_results and check if all results are collected
+    add_to_query_results(task_ptr);
+    // 2. check if all cluster results are collected for this query
+    if (!query_results[task_ptr->client_id][task_ptr->query_batch_id]->clusters_results_all_received()) {
         TimestampLogger::log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->cluster_id);
         return false;
     }
     TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->cluster_id);
-    // 4. All cluster results are collected. Retrieve the top_k docs contents
-    if (!query_results[task_ptr->query_text]->retrieved_top_k_docs) {
-        bool get_top_k_docs_success = this->get_topk_docs(typed_ctxt, task_ptr->query_text);
-        if (!get_top_k_docs_success) {
-            dbg_default_error("Failed to get top_k_docs for query_text={}.", task_ptr->query_text);
-            return false;
-        }
+    // 3. All cluster results are collected. Retrieve the top_k docs contents
+    bool get_top_k_docs_success = this->get_topk_docs(typed_ctxt, task_ptr->client_id, task_ptr->query_batch_id);
+    if (!get_top_k_docs_success) {
+        dbg_default_error("Failed to get top_k_docs for query_text={}.", task_ptr->query_text);
+        return false;
     }
     TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->qid);
-    if (parent->include_llm) {
-        // 5. run LLM with the query and its top_k closest docs
-        async_run_llm_with_top_k_docs(task_ptr->query_text);
-        return false;
-    } else {
-        // 5. notify the client with only searched top_k results
-        return true;
-    }
-}
-
-void AggGenOCDPO::ProcessThread::get_clients_with_same_query(const std::string& query_text,
-                                                            client_queries_map_t& notify_info){
-    for (const auto& query_source : query_request_tracker[query_text]) {
-        if (query_source.notified_client) {
-            continue;
-        } else{
-            notify_info[query_source.client_id].push_back(std::make_tuple(query_text, query_source.query_batch_id, query_source.qid));
-        }
-    }
+    return true;
 }
 
 void AggGenOCDPO::ProcessThread::process_tasks(DefaultCascadeContextType* typed_ctxt, 
                                             std::vector<std::unique_ptr<queuedTask>>& tasks,
-                                            std::vector<std::string>& finished_queries){
+                                            std::map<int, std::vector<int>>& results_to_notify){
     for (auto& task_ptr : tasks) {
-        bool collected_all_cluster_results = process_task(typed_ctxt, task_ptr.get());
-        if (collected_all_cluster_results & !parent->include_llm) {
-            finished_queries.push_back(task_ptr->query_text);
-        }
-    }
-}
-
-void AggGenOCDPO::ProcessThread::process_llm_async_results(std::vector<std::string>& finished_queries) {
-    for (auto it = this->query_api_futures.begin(); it != this->query_api_futures.end();) {
-        auto& future = it->second;
-        if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-            // Future is ready; retrieve and process result
-            std::string result = future.get();
-            this->query_results[it->first]->api_result = result;
-            finished_queries.push_back(it->first);
-            it = this->query_api_futures.erase(it);
-        } else {
-            ++it;
+        bool collected_all_results = process_task(typed_ctxt, task_ptr.get());
+        if (collected_all_results) {
+            results_to_notify[task_ptr->client_id].push_back(task_ptr->query_batch_id);
         }
     }
 }
@@ -282,25 +214,13 @@ void AggGenOCDPO::ProcessThread::main_loop(DefaultCascadeContextType* typed_ctxt
         lock.unlock();
 
         // process pending tasks in batch
-        std::vector<std::string> finished_queries;
+        std::map<int, std::vector<int>> results_to_notify;
         if (current_batch_count != 0) {
-            process_tasks(typed_ctxt, tasks, finished_queries);
+            process_tasks(typed_ctxt, tasks, results_to_notify);
             tasks.clear();
         }
-        if (parent->include_llm) {
-            process_llm_async_results(finished_queries);
-        }
         // batch the queries for each client to send notifications
-        if (!finished_queries.empty()) {
-            client_queries_map_t notify_client_queries;
-            for (const auto& query_text : finished_queries) {
-                get_clients_with_same_query(query_text, notify_client_queries);
-            }
-            // notify each client
-            for (const auto& [client_id, query_info] : notify_client_queries) {
-                serialize_results_and_notify_client(typed_ctxt, query_info, client_id);
-            }
-        }
+        notify_clients_in_batch(typed_ctxt, results_to_notify);
     }
 }
 
@@ -387,16 +307,12 @@ bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id,
     }
     // parse the reply.blob.bytes to std::string
     char* doc_data = const_cast<char*>(reinterpret_cast<const char*>(reply.blob.bytes));
-    std::string doc_str(doc_data, reply.blob.size);  /*** TODO: this is a copy, need to optimize */
+    std::string doc_str(doc_data, reply.blob.size);  
     this->doc_contents[cluster_id][emb_index] = doc_str;
     res_doc = this->doc_contents[cluster_id][emb_index];
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_END, this->my_id, emb_index, cluster_id);
     return true;
 }
-
-
-
-
 
 
 void AggGenOCDPO::ocdpo_handler(const node_id_t sender, 
@@ -445,10 +361,7 @@ void AggGenOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, const nlohma
     try{
         if (config.contains("top_num_centroids")) this->top_num_centroids = config["top_num_centroids"].get<int>();
         if (config.contains("final_top_k")) this->top_k = config["final_top_k"].get<int>();
-        if (config.contains("include_llm")) this->include_llm = config["include_llm"].get<bool>();
         if (config.contains("retrieve_docs")) this->retrieve_docs = config["retrieve_docs"].get<bool>();
-        if (config.contains("openai_api_key")) this->openai_api_key = config["openai_api_key"].get<std::string>();
-        if (config.contains("llm_model_name")) this->llm_model_name = config["llm_model_name"].get<std::string>();
         if (config.contains("batch_time_us")) this->batch_time_us = config["batch_time_us"].get<int>();
         if (config.contains("min_batch_size")) this->min_batch_size = config["min_batch_size"].get<int>();
         if (config.contains("max_batch_size")) this->max_batch_size = config["max_batch_size"].get<int>();
