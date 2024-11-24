@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
-#include <mutex>
 #include <random>
 #include <unordered_map>
 
@@ -57,27 +56,15 @@ public:
      std::unique_ptr<hnswlib::HierarchicalNSW<float>> cpu_hnsw_index; // HNSWLIB index object. Initialize if use hnswlib cpu search 
      std::unique_ptr<hnswlib::L2Space> l2_space;
 
-     std::vector<std::string> query_texts; // query texts list
-     std::vector<std::string> query_keys; // query key list 1-1 correspondence with query_texts
-     float* query_embs; // query embeddings
-     std::atomic<int> added_query_offset; // the offset of the query embeddings added so far in the query_embs array
-     mutable std::mutex query_embs_mutex; 
-     mutable std::condition_variable query_embs_cv;
-     std::atomic<bool> query_embs_in_search;
-
-
-
 
 
      GroupedEmbeddingsForSearch(int type, int dim) 
-          : search_type(static_cast<SearchType>(type)), emb_dim(dim), num_embs(0), embeddings(nullptr),added_query_offset(0), query_embs_in_search(false) {
-          query_embs = new float[dim * MAX_NUM_QUERIES_PER_BATCH];
+          : search_type(static_cast<SearchType>(type)), emb_dim(dim), num_embs(0), embeddings(nullptr) {
           initialized_index.store(false);
      }
 
      GroupedEmbeddingsForSearch(int dim, int num, float* data) 
-          : search_type(SearchType::FaissCpuFlatSearch), emb_dim(dim), num_embs(num), embeddings(data), added_query_offset(0), query_embs_in_search(false) {
-          query_embs = new float[dim * MAX_NUM_QUERIES_PER_BATCH];
+          : search_type(SearchType::FaissCpuFlatSearch), emb_dim(dim), num_embs(num), embeddings(data){
           initialized_index.store(false);
      }
 
@@ -224,80 +211,6 @@ public:
      }
 
      /***
-      * Add the query embeddings to the query_embs array to be processed by batch
-      * @param nq: number of queries
-      * @param xq: flaten queries to search
-      * @param query_list: the list of query texts to be added to the cache
-      * TODO: current implementation incurs one copy of the xq array, need to optimize
-      */
-     void add_queries(int nq, float* xq, std::vector<std::string>&& query_list, std::string key_string){
-          std::unique_lock<std::mutex> lock(query_embs_mutex);
-          // wait if query_embs is in search or if offset is full
-          query_embs_cv.wait(lock, [this, nq] { return !query_embs_in_search && this->added_query_offset + nq * this->emb_dim <= MAX_NUM_QUERIES_PER_BATCH * this->emb_dim; });
-          memcpy(query_embs + this->added_query_offset, xq, nq * this->emb_dim * sizeof(float));
-          this->added_query_offset += nq * this->emb_dim;
-          this->query_texts.reserve(this->query_texts.size() + query_list.size());
-          this->query_texts.insert(this->query_texts.end(), std::make_move_iterator(query_list.begin()), std::make_move_iterator(query_list.end()));
-          for (int i = 0; i < nq; i++) {
-               this->query_keys.push_back(key_string);
-          }
-          query_embs_cv.notify_one(); 
-     }
-
-     bool has_pending_queries() const{
-          return this->added_query_offset > 0;
-     }
-
-     /***
-      * Search the top K embeddings that are close to the queries in batch, 
-      * this implementation uses the locally cached query embeddings, and requires locks
-      * TODO: to be replaced by the search below, the UDL should handle the batched queries
-      * @param top_k: number of top embeddings to return
-      * @param D: distance array, storing the distance of the top_k embeddings
-      * @param I: index array, storing the index of the top_k embeddings
-      * @param q_list: the list of query texts that have been batchSearched on  
-      * @param q_keys: the list of query keys that have been batchSearched on
-      * @param cluster_id: the cluster id that the queries belong to (used for logger)
-      * @return true if the search is successful, false otherwise
-      */
-     bool batchedSearch(int top_k, float** D, long** I, std::vector<std::string>& q_list, std::vector<std::string>& q_keys, int cluster_id){
-          std::unique_lock<std::mutex> lock(query_embs_mutex);
-          query_embs_in_search = true;
-          int nq = this->added_query_offset / this->emb_dim;
-          if (nq == 0) {
-               // This case should not happen
-               query_embs_in_search = false;
-               query_embs_cv.notify_one();
-               std::cerr << "Error: no query embeddings to search, offset="<< this->added_query_offset << std::endl;
-               return false;
-          }
-          *I = new long[top_k * nq];
-          *D = new float[top_k * nq];
-          std::vector<std::tuple<int, int>> query_batch_infos;
-          for (const auto& key : this->query_keys) {
-               int client_id = -1;
-               int query_batch_id = -1;
-               parse_batch_id(key, client_id, query_batch_id); // Logging purpose
-               TimestampLogger::log(LOG_BATCH_FAISS_SEARCH_START,client_id,query_batch_id,cluster_id);
-               query_batch_infos.emplace_back(client_id, query_batch_id);
-               TimestampLogger::log(LOG_BATCH_FAISS_SEARCH_SIZE,nq,query_batch_id,cluster_id);
-          }
-          search(nq, this->query_embs, top_k, *D, *I);
-          for (const auto& batch_info: query_batch_infos) {
-               TimestampLogger::log(LOG_BATCH_FAISS_SEARCH_END,std::get<0>(batch_info),std::get<1>(batch_info),cluster_id);
-          }
-          // reset the query_embs array and transfer ownership of the query_texts
-          this->added_query_offset = 0;
-          q_list = std::move(this->query_texts);
-          q_keys = std::move(this->query_keys);
-          // std::fill(this->query_embs, this->query_embs + nq * this->emb_dim, 0);  // could be skipped since already reset the offset
-          query_embs_in_search = false;
-          query_embs_cv.notify_one();
-          return true;
-     }    
-
-
-     /***
       * Search the top K embeddings that are close to one query
       * @param nq: number of queries
       * @param xq: flaten queries to search
@@ -439,12 +352,7 @@ public:
                free(this->embeddings);
                this->embeddings = nullptr; 
           }
-          if (this->query_embs != nullptr) {
-               delete[] this->query_embs;
-               this->query_embs = nullptr;
-          }
-          // FAISS index cleanup 
-
+          // index cleanup 
           if (this->search_type == SearchType::FaissCpuFlatSearch && this->cpu_flatl2_index != nullptr) {
                this->cpu_flatl2_index->reset();
           } 
@@ -481,10 +389,6 @@ public:
           if (this->embeddings != nullptr) {
                free(this->embeddings);
                this->embeddings = nullptr; 
-          }
-          if (this->query_embs != nullptr) {
-               delete[] this->query_embs;
-               this->query_embs = nullptr;
           }
      }
 
