@@ -90,6 +90,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
             trigger the subsequent UDL by evict the queries to shards that contains its top cluster_embs 
             according to affinity set sharding policy
     ***/
+    auto num_shards = typed_ctxt->get_service_client_ref().get_number_of_shards<VolatileCascadeStoreWithStringKey>(NEXT_UDL_SUBGROUP_ID);
     std::map<long, std::vector<int>> cluster_ids_to_query_ids = std::map<long, std::vector<int>>();
     this->combine_common_clusters(I, nq, cluster_ids_to_query_ids);
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
@@ -128,7 +129,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emb_string.c_str()), query_emb_string.size());
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
 
-        typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first), true); // TODO: change this hard-coded subgroup_id
+        typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first) % num_shards, true); // TODO: change this hard-coded subgroup_id
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
         dbg_default_trace("[Centroids search ocdpo]: Emitted key: {}",new_key);
     }
