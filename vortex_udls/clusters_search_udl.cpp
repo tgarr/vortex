@@ -260,9 +260,9 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
     TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,client_id,query_batch_id,parsed_cluster_id);
     // 1. Move the object to the active queue to be processed
-    uint64_t to_thread = query_batch_id % this->num_threads;
-    this->cluster_search_threads[to_thread]->push_to_query_buffer(parsed_cluster_id, object.blob, key_string);
-    dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue on thread{}.", key_string, to_thread);
+    this->cluster_search_threads[next_thread]->push_to_query_buffer(parsed_cluster_id, object.blob, key_string);
+    dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue on thread{}.", key_string, next_thread);
+    next_thread = (next_thread + 1) % this->num_threads; // cycle
 }
 
 

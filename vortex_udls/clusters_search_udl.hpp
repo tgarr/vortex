@@ -110,6 +110,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     size_t min_batch_size = 1; // min number queries to process in each batch
     size_t max_batch_size = 1000; // max number queries to process in each batch, for hnsw search, set it to 1 is optimal
     int num_threads = 1; // number of threads to process the cluster search
+    uint64_t next_thread = 0;
 
     int cluster_id = -1; // the cluster that this node handles
     mutable std::shared_mutex cluster_search_index_mutex;
