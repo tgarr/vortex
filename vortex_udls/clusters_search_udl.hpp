@@ -23,8 +23,6 @@ namespace cascade{
 #define CLUSTER_EMB_OBJECTPOOL_PREFIX "/rag/emb/clusters/cluster"
 #define EMIT_AGGREGATE_PREFIX "/rag/generate/agg"
 
-constexpr size_t CACHE_LINE_SIZE = 64;
-constexpr size_t INITIAL_QUEUE_CAPACITY = 1024;
 
 std::string get_uuid() {
     return MY_UUID;
@@ -34,22 +32,7 @@ std::string get_description() {
     return MY_DESC;
 }
 
-struct queryQueue{
-    std::vector<std::string> query_list;
-    std::vector<std::string> query_keys;
-    float* query_embs;
-    size_t query_embs_capacity; 
-    std::atomic<size_t> added_query_offset;
-    int emb_dim;
 
-    queryQueue(int emb_dim);
-    ~queryQueue();
-    float* aligned_alloc(size_t size);
-    void resize_queue(size_t new_capacity);
-    bool add_queries(std::vector<std::string>&& queries, const std::string& key, float* embs, int emb_dim, int num_queries);
-    int count_queries();
-    void reset();
-};
 
 
 class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {

@@ -9,67 +9,6 @@
 namespace derecho{
 namespace cascade{
 
-queryQueue::queryQueue(int emb_dim): emb_dim(emb_dim) {
-    query_list.reserve(INITIAL_QUEUE_CAPACITY);
-    query_keys.reserve(INITIAL_QUEUE_CAPACITY);
-    query_embs_capacity = INITIAL_QUEUE_CAPACITY;
-    query_embs = aligned_alloc(query_embs_capacity * emb_dim * sizeof(float));
-    added_query_offset = 0;
-}
-
-queryQueue::~queryQueue() {
-    delete[] query_embs;
-}
-
-float* queryQueue::aligned_alloc(size_t size) {
-    void* ptr = nullptr;
-    if (posix_memalign(&ptr, CACHE_LINE_SIZE, size) != 0) {
-        throw std::bad_alloc();
-    }
-    return static_cast<float*>(ptr);
-}
-
-void queryQueue::resize_queue(size_t new_query_capacity) {
-    size_t new_capacity_in_elements = new_query_capacity * emb_dim;
-    float* new_embs = aligned_alloc(new_capacity_in_elements * sizeof(float));
-    size_t current_size_in_elements = added_query_offset.load();
-    memcpy(new_embs, query_embs, current_size_in_elements * sizeof(float));
-    free(query_embs); // Free the old memory
-    query_embs = new_embs;
-    query_embs_capacity = new_query_capacity;
-    query_list.reserve(new_query_capacity);
-    query_keys.reserve(new_query_capacity);
-}
-
-bool queryQueue::add_queries(std::vector<std::string>&& queries, const std::string& key, float* embs, int emb_dim, int num_queries) {
-    if (this->emb_dim != emb_dim) {
-        return false;
-    }
-    size_t required_queries = added_query_offset / this->emb_dim + num_queries;
-    if (required_queries > query_embs_capacity) {
-        size_t new_query_capacity = query_embs_capacity;
-        while (required_queries > new_query_capacity) {
-            new_query_capacity *= 2;
-        }
-        resize_queue(new_query_capacity);
-    }
-    query_list.insert(query_list.end(), std::make_move_iterator(queries.begin()), std::make_move_iterator(queries.end()));
-    query_keys.insert(query_keys.end(), num_queries, key);
-    // TODO: could do better by only one copy from the blob object at deserialization
-    memcpy(query_embs + added_query_offset, embs, num_queries * emb_dim * sizeof(float));
-    added_query_offset += num_queries * emb_dim;
-    return true;
-}
-
-int queryQueue::count_queries() {
-    return query_list.size();
-}
-
-void queryQueue::reset() {
-    query_list.clear();
-    query_keys.clear();
-    added_query_offset = 0;
-}
 
 ClustersSearchOCDPO::ClusterSearchWorker::ClusterSearchWorker(uint64_t thread_id, 
                                         ClustersSearchOCDPO* parent_udl)
@@ -266,11 +205,11 @@ void ClustersSearchOCDPO::ClusterSearchWorker::signal_stop() {
 bool ClustersSearchOCDPO::check_and_retrieve_cluster_index(DefaultCascadeContextType* typed_ctxt){
     // Acquire a unique lock to modify the cluster search index
     std::unique_lock<std::shared_mutex> write_lock(cluster_search_index_mutex);
-    TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START, my_id, this->cluster_id, 0);
     // Double-check if the cluster was inserted by another thread
     if (cluster_search_index->initialized_index.load()) {
         return true;
     } 
+    TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START, my_id, this->cluster_id, 0);
     std::string cluster_prefix = CLUSTER_EMB_OBJECTPOOL_PREFIX + std::to_string(this->cluster_id);
     int filled_cluster_embs = cluster_search_index->retrieve_grouped_embeddings(cluster_prefix, typed_ctxt);
     if (filled_cluster_embs == -1) {

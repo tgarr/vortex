@@ -38,8 +38,7 @@ struct batchedTask {
 class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     /***
-     * A thread class to wait for the encoder result of the queries
-     * then compute topk centroids and emit to the next UDL
+     * A thread class to compute topk centroids and emit to the next UDL
      */
     class ProcessBatchedTasksThread {
         private:
@@ -82,9 +81,6 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     int emb_dim = 64; // dimension of each embedding
     int top_num_centroids = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
-    bool include_encoder = false; // if the external client's query already contain embeddings, then no need to generate them here
-    std::string encoder_name = "text-embedding-3-small";
-    std::string openai_api_key;
     std::string emit_key_prefix = "/rag/emb/clusters_search";
     
     std::atomic<bool> new_request = false;
