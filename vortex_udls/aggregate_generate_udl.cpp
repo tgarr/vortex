@@ -203,7 +203,7 @@ void AggGenOCDPO::ProcessThread::main_loop(DefaultCascadeContextType* typed_ctxt
         auto pending_count = this->pending_tasks.size();
         auto current_batch_count = 0;
         // move out the pending tasks in batch to be processed
-        if (pending_count > parent->min_batch_size || (now - wait_start) < batch_time) {
+        if (pending_count >= parent->min_batch_size || (now - wait_start) >= batch_time) {
             current_batch_count = std::min(pending_count, static_cast<size_t>(parent->max_batch_size));
             wait_start = now;
             while (!this->pending_tasks.empty() && tasks.size() < current_batch_count) {

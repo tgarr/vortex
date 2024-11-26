@@ -13,7 +13,7 @@ namespace cascade{
 ClustersSearchOCDPO::ClusterSearchWorker::ClusterSearchWorker(uint64_t thread_id, 
                                         ClustersSearchOCDPO* parent_udl)
         : my_thread_id(thread_id), parent(parent_udl), running(false){
-    use_shadow_flag.store(0);
+    use_shadow_flag = 0;
     query_buffer = std::make_unique<queryQueue>(parent->emb_dim);
     shadow_query_buffer = std::make_unique<queryQueue>(parent->emb_dim);
 }
@@ -120,9 +120,9 @@ void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(Defau
 
 // check number of pending queries
 bool ClustersSearchOCDPO::ClusterSearchWorker::enough_pending_queries(int num){
-    if (use_shadow_flag.load() && shadow_query_buffer->count_queries() >= num) {
+    if (use_shadow_flag == 1 && shadow_query_buffer->count_queries() >= num) {
         return true;
-    } else if (!use_shadow_flag.load() && query_buffer->count_queries() >= num) {
+    } else if (use_shadow_flag == 0 && query_buffer->count_queries() >= num) {
         return true;
     }
     return false;
@@ -142,14 +142,13 @@ void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextTy
         }
 
         // TODO: if push_queries happens too frequent, add priority to the main_loop to process the queries
-        use_shadow_flag.fetch_xor(true); // flip the shadow flag, so the push_thread can start a new buffer
+        use_shadow_flag ^= 1; // flip the shadow flag, so the push_thread can start a new buffer
         query_buff_lock.unlock();
-        query_buffer_cv.notify_one();
         
         if (!running) break;
 
         queryQueue* cur_query_buffer = nullptr;
-        if (use_shadow_flag.load()) {
+        if (use_shadow_flag == 1) {
             cur_query_buffer = query_buffer.get();
         } else {
             cur_query_buffer = shadow_query_buffer.get();
@@ -177,7 +176,7 @@ void ClustersSearchOCDPO::ClusterSearchWorker::push_to_query_buffer(int cluster_
     // 2. add the queries to the queueing batch
     std::unique_lock<std::mutex> lock(query_buffer_mutex);
     // this step incurs a copy of the query embedding float[], to make it aligned with the other embeddings in the buffer for batching
-    if (use_shadow_flag.load()) {
+    if (use_shadow_flag == 1) {
         shadow_query_buffer->add_queries(std::move(query_list), key, data, parent->emb_dim, nq);
     } else {
         query_buffer->add_queries(std::move(query_list), key, data, parent->emb_dim, nq);

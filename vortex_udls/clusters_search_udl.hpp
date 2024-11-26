@@ -51,7 +51,7 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
         std::unique_ptr<queryQueue> query_buffer;
         std::unique_ptr<queryQueue> shadow_query_buffer;
-        std::atomic<int> use_shadow_flag;  // if this is 1, then add to shadow_query_buffer, otherwise add to query_buffer
+        int use_shadow_flag;  // if this is 1, then add to shadow_query_buffer, otherwise add to query_buffer
         std::condition_variable_any query_buffer_cv;
         std::mutex query_buffer_mutex;
         
