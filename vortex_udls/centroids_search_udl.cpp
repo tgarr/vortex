@@ -34,7 +34,7 @@ bool CentroidsSearchOCDPO::ProcessBatchedTasksThread::get_queries_and_emebddings
                                                         const uint32_t& client_id,
                                                         const uint32_t& query_batch_id) {
     try{
-        deserialize_embeddings_and_quries_from_bytes(blob->bytes,blob->size,nq,parent->emb_dim,data,query_list);
+        new_deserialize_embeddings_and_quries_from_bytes(blob->bytes,blob->size,nq,parent->emb_dim,data,query_list);
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Error: Centroids search failed to deserialize the query embeddings and query texts from the object." << std::endl;
@@ -62,6 +62,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         if (!parent->retrieve_and_cache_centroids_index(typed_ctxt)) 
             return;
     }
+
     // 1. get the query embeddings from the object
     TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
     float* data;

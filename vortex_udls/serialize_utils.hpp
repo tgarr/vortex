@@ -56,6 +56,13 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
                                                             float*& query_embeddings,
                                                             std::vector<std::string>& query_list);
 
+void new_deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
+                                                            const std::size_t& data_size,
+                                                            uint32_t& nq,
+                                                            const int& emb_dim,
+                                                            float*& query_embeddings,
+                                                            std::vector<std::string>& query_list);
+
 /***
 * Format the search results for each query to send to the next UDL.
 * The format is | top_k | embeding_id_vector | distance_vector | query_text |

@@ -22,11 +22,13 @@ std::string get_description() {
     return MY_DESC;
 }
 
+// TODO this is gonna be turned into one query (instead of the whole batch)
 struct batchedTask {
-    std::string key;
+    std::string key; // TODO remove: keeping for now for the sake of compatibility
     uint32_t client_id;
-    uint32_t query_batch_id;
-    Blob blob;
+    uint32_t query_batch_id; // TODO remove: keeping for now for the sake of compatibility
+    Blob blob; // TODO this is probably going to be just a pointer to the buffer
+    // TODO add metadata
 
     // std::vector<std::string> queries;
     // // CURL *curl;

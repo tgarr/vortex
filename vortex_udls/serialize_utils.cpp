@@ -173,6 +173,46 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
      }
 }
 
+void new_deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
+                                                            const std::size_t& data_size,
+                                                            uint32_t& nq,
+                                                            const int& emb_dim,
+                                                            float*& query_embeddings,
+                                                            std::vector<std::string>& query_list) {
+    if (data_size < 4) {
+        throw std::runtime_error("Data size is too small to deserialize its embeddings and queries.");
+    }
+
+    // index
+    std::unique_ptr<std::unordered_map<uint64_t,uint32_t>> batch_index = mutils::from_bytes<std::unordered_map<uint64_t,uint32_t>>(nullptr,bytes);
+
+    // XXX for compatibility, get the order in which queries are written (embeddings and text)
+    // TODO this will not be needed after refactoring all UDLs
+    std::vector<uint64_t> id_list;
+    for(auto& item : *batch_index){
+        id_list.push_back(item.first);
+    }
+    std::sort(id_list.begin(),id_list.end(),[&](const uint64_t& l, const uint64_t& r){
+            return batch_index->at(l) < batch_index->at(r);
+        });
+
+    // 0. get the number of queries in the blob object
+    nq = batch_index->size();
+    dbg_default_trace("In [{}],Number of queries: {}",__func__,nq);
+
+    // 1. get the embeddings of the queries from the blob object
+    const uint32_t *metadata = reinterpret_cast<const uint32_t *>(bytes + batch_index->at(id_list.front()));
+    uint32_t embeddings_position = metadata[3];
+    query_embeddings = const_cast<float*>(reinterpret_cast<const float*>(bytes + embeddings_position));
+
+    // 2. get the queries from the blob object
+    for(auto query_id : id_list){
+        metadata = reinterpret_cast<const uint32_t *>(bytes + batch_index->at(query_id));
+        auto query_txt = *mutils::from_bytes<std::string>(nullptr,bytes + metadata[1]);
+        query_list.emplace_back(std::move(query_txt));
+    }
+}
+
 /***
 * Format the search results for each query to send to the next UDL.
 * The format is | top_k | embeding_id_vector | distance_vector | query_text |

@@ -73,7 +73,7 @@ void ClustersSearchOCDPO::ClusterSearchWorker::emit_results(DefaultCascadeContex
         // parse_batch_id(obj.key, client_id, query_batch_id);
         // TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START, client_id, query_batch_id, this->cluster_id);
         // emit result
-        typed_ctxt->get_service_client_ref().put_and_forget(obj);
+        typed_ctxt->get_service_client_ref().put_and_forget(obj,true);
     }
 }
 

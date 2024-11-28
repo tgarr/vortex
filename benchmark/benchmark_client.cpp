@@ -96,7 +96,7 @@ void VortexBenchmarkClient::setup(uint64_t batch_min_size,uint64_t batch_max_siz
 
 query_id_t VortexBenchmarkClient::next_query_id(){
     std::unique_lock<std::mutex> lock(query_id_mtx);
-    query_id_t query_id = (my_id << 48) | query_count;
+    query_id_t query_id = (static_cast<uint64_t>(my_id) << 48) | query_count;
     query_count++;
     return query_id;
 }
@@ -246,26 +246,79 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
         // now we are outside the locked region (i.e the client can continue adding queries to the queue): build object and call trigger_put
         if(send_count > 0){
             ObjectWithStringKey obj;
-            obj.key = "/rag/emb/centroids_search/client" + std::to_string(node_id) + "/qb" + std::to_string(batch_id);
+            obj.key = UDL1_PATH "/client" + std::to_string(node_id) + "/qb" + std::to_string(batch_id); // batch_id is important for randomizing the shard that gets each batch
 
             // build Blob from queries in to_send
-            std::string batch_string;
-            build_batch_string(batch_string,to_send,send_count,emb_dim);
-            obj.blob = Blob(reinterpret_cast<const uint8_t*>(batch_string.c_str()), batch_string.size());
             
+            std::unordered_map<query_id_t,uint32_t> query_index; // maps query_id to position in the buffer
+            uint32_t total_size = 0;
+            uint32_t metadata_size = sizeof(uint32_t) * 5;
+            uint32_t query_emb_size = sizeof(float) * emb_dim;
+
+            // compute the number of bytes each query will take in the buffer
+            for(uint64_t i=0;i<send_count;i++){
+                query_id_t query_id = std::get<0>(to_send[i]);
+                const std::string& query_txt = *std::get<1>(to_send[i]);
+                const float* query_emb = std::get<2>(to_send[i]);
+
+                uint32_t query_text_size = mutils::bytes_size(query_txt);
+                total_size += query_text_size + metadata_size + query_emb_size;
+                query_index[query_id] = query_text_size; // save this here temporarily
+            }
+
+            uint32_t index_size = mutils::bytes_size(query_index);
+            total_size += index_size; // total buffer size
+
+            // use a lambda to build buffer, to avoid a copy
+            obj.blob = Blob([&](uint8_t* buffer,const std::size_t size){
+                    uint32_t metadata_position = index_size; // position to start writing metadata
+                    uint32_t embeddings_position = metadata_position + (send_count * metadata_size); // position to start writing the embeddings
+                    uint32_t text_position = embeddings_position + (send_count * query_emb_size); // position to start writing the query texts
+
+                    // write each query to the buffer, starting at buffer_position
+                    for(uint64_t i=0;i<send_count;i++){
+                        query_id_t query_id = std::get<0>(to_send[i]);
+                        const std::string& query_txt = *std::get<1>(to_send[i]);
+                        const float* query_emb = std::get<2>(to_send[i]);
+
+                        uint32_t query_text_size = query_index[query_id];
+                        query_index[query_id] = metadata_position; // update with the position where the metadata for this query is
+
+                        // write metadata: node_id, query_text_position, query_text_size, embeddings_position, query_emb_size
+                        uint32_t metadata_array[5] = {node_id,text_position,query_text_size,embeddings_position,query_emb_size};
+                        std::memcpy(buffer+metadata_position,metadata_array,metadata_size);
+
+                        // write embeddings
+                        std::memcpy(buffer+embeddings_position,query_emb,query_emb_size);
+                        
+                        // write text
+                        mutils::to_bytes(query_txt,buffer+text_position);
+                       
+                        // update position for the next 
+                        metadata_position += metadata_size;
+                        embeddings_position += query_emb_size;
+                        text_position += query_text_size;
+                    }
+
+                    // write index
+                    mutils::to_bytes(query_index,buffer);
+
+                    return size;
+                },total_size);
+
             for(uint64_t i=0;i<send_count;i++){
                 auto query_id = std::get<0>(to_send[i]);
-                // TODO this is inefficient: we should use just query_id (but this requires chaning the UDLs to carry query_id around)
+                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,node_id,batch_id,i); // TODO update with just query_id
+                
                 std::unique_lock<std::shared_mutex> lock(map_mutex);
-                batched_query_to_index_and_id[batch_id][*std::get<1>(to_send[i])] = std::make_pair(i,query_id);
-                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,node_id,batch_id,i);
+                batched_query_to_index_and_id[batch_id][*std::get<1>(to_send[i])] = std::make_pair(i,query_id); // TODO this will not be necessary
             }
 
             // trigger put
             capi.trigger_put(obj);
             
             for(uint64_t i=0;i<send_count;i++){
-                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,node_id,batch_id,i);
+                TimestampLogger::log(LOG_TAG_QUERIES_SENDING_END,node_id,batch_id,i); // TODO update with just query_id
             }
 
             batch_size[batch_id] = send_count; // for statistics

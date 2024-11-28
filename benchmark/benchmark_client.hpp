@@ -40,7 +40,7 @@ class VortexBenchmarkClient {
     private:
         std::thread real_thread;
         ServiceClientAPI& capi = ServiceClientAPI::get_service_client();
-        uint64_t node_id = capi.get_my_id();
+        uint32_t node_id = capi.get_my_id();
         uint64_t batch_min_size = 0;
         uint64_t batch_max_size = 5;
         uint64_t batch_time_us = 500;
@@ -105,7 +105,7 @@ class VortexBenchmarkClient {
     };
 
     ServiceClientAPI& capi = ServiceClientAPI::get_service_client();
-    uint64_t my_id = capi.get_my_id();
+    uint32_t my_id = capi.get_my_id();
     ClientThread *client_thread;
     std::deque<NotificationThread> notification_threads;
     uint64_t emb_dim = 1024;
