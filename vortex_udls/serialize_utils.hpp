@@ -2,10 +2,47 @@
 #include <queue>
 #include <vector>
 #include <string>
+#include <cascade/service_client_api.hpp>
 
 #define QUERY_BATCH_ID_MODULUS 100000
 #define CLUSTER_KEY_DELIMITER "_cluster"
 
+/* 
+ * VortexEmbeddingQueryBatcher gathers and serializes queries with their embeddings to be sent to UDL1 and to UDL2.
+ *
+ */
+
+using query_id_t = uint64_t;
+using queued_query_t_tmp = std::tuple<query_id_t,const std::string *,const float *>; // TODO temporary: need this for the rest to compile
+using queued_query_t = std::tuple<query_id_t,uint32_t,std::shared_ptr<float>,std::shared_ptr<std::string>>; // query ID, client node ID, embeddings, query text
+
+class VortexEmbeddingQueryBatcher {
+    uint64_t emb_dim;
+    uint32_t metadata_size;
+    uint32_t query_emb_size;
+
+    std::vector<queued_query_t> queries;
+    std::shared_ptr<derecho::cascade::Blob> blob;
+    std::unordered_map<query_id_t,uint32_t> query_index;
+
+public:
+    VortexEmbeddingQueryBatcher(uint64_t emb_dim,uint64_t size_hint = 1000);
+
+    void add_query(queued_query_t &queued_query);
+    void add_query(query_id_t query_id,uint32_t node_id,std::shared_ptr<float> query_emb,std::shared_ptr<std::string> query_text);
+
+    void serialize();
+
+    std::shared_ptr<derecho::cascade::Blob> get_blob();
+
+    void reset();
+};
+
+
+/*
+ * Helper functions
+ *
+ */
 
 std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list, uint32_t embedding_dim);
 

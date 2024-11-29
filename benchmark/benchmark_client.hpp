@@ -29,9 +29,6 @@ using namespace derecho::cascade;
 
 #define VORTEX_CLIENT_MAX_WAIT_TIME 60
 
-using query_id_t = uint64_t; 
-using queued_query_t = std::tuple<query_id_t,const std::string*,const float*>;
-
 class VortexBenchmarkClient {
     /*
      * This thread is responsible for batching queries and sending them to the first UDL in the pipeline (using trigger_put).
@@ -50,13 +47,13 @@ class VortexBenchmarkClient {
         std::mutex thread_mtx;
         std::condition_variable thread_signal;
 
-        std::queue<queued_query_t> query_queue;
+        std::queue<queued_query_t_tmp> query_queue;
 
         void main_loop();
 
     public:
         ClientThread(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim);
-        void push_query(queued_query_t &queued_query);
+        void push_query(queued_query_t_tmp &queued_query);
         void signal_stop();
         std::unordered_map<uint64_t,uint64_t> batch_size;
 

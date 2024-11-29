@@ -103,7 +103,7 @@ query_id_t VortexBenchmarkClient::next_query_id(){
 
 uint64_t VortexBenchmarkClient::query(const std::string& query,const float* query_emb){
     query_id_t query_id = VortexBenchmarkClient::next_query_id();
-    queued_query_t new_query(query_id,&query,query_emb);
+    queued_query_t_tmp new_query(query_id,&query,query_emb);
     client_thread->push_query(new_query);
     return query_id;
 }
@@ -173,7 +173,7 @@ VortexBenchmarkClient::ClientThread::ClientThread(uint64_t batch_min_size,uint64
     this->emb_dim = emb_dim;
 }
 
-void VortexBenchmarkClient::ClientThread::push_query(queued_query_t &queued_query){
+void VortexBenchmarkClient::ClientThread::push_query(queued_query_t_tmp &queued_query){
     std::unique_lock<std::mutex> lock(thread_mtx);
     query_queue.push(queued_query);
     thread_signal.notify_all();
@@ -185,36 +185,11 @@ void VortexBenchmarkClient::ClientThread::signal_stop(){
     thread_signal.notify_all();
 }
 
-// helper function
-void inline build_batch_string(std::string& batch_string,queued_query_t* to_send,uint64_t send_count,uint64_t emb_dim){
-    // TODO this seems inefficient, but since it is not the bottleneck, we can leave it this way for now
-
-    // create an bytes object by concatenating: num_queries + float array of embeddings + list of query_text
-    batch_string.reserve(sizeof(uint32_t) + (send_count * sizeof(float) * emb_dim) + (send_count * 200));
-    
-    uint32_t num_queries = static_cast<uint32_t>(send_count);
-    std::string nq_bytes(4, '\0');
-    nq_bytes[0] = (num_queries >> 24) & 0xFF;
-    nq_bytes[1] = (num_queries >> 16) & 0xFF;
-    nq_bytes[2] = (num_queries >> 8) & 0xFF;
-    nq_bytes[3] = num_queries & 0xFF;
-    batch_string += nq_bytes;
-
-    std::vector<std::string> query_list;
-    query_list.reserve(num_queries);
-    for(uint32_t i=0;i<num_queries;i++){
-        batch_string.append(reinterpret_cast<const char*>(std::get<2>(to_send[i])),sizeof(float) * emb_dim);
-        query_list.push_back(*std::get<1>(to_send[i]));
-    }
-
-    batch_string += nlohmann::json(query_list).dump();
-}
-
 void VortexBenchmarkClient::ClientThread::main_loop(){
     if(!running) return;
     
     // thread main loop
-    queued_query_t to_send[batch_max_size];
+    queued_query_t_tmp to_send[batch_max_size];
     auto wait_start = std::chrono::steady_clock::now();
     auto batch_time = std::chrono::microseconds(batch_time_us);
     uint64_t batch_id = 0;

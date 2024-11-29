@@ -4,7 +4,96 @@
 #include <unordered_set>
 #include <cascade/utils.hpp>
 #include "serialize_utils.hpp"
-#include <cascade/service_client_api.hpp>
+
+
+/*
+ * VortexEmbeddingQueryBatcher implementation
+ */
+
+VortexEmbeddingQueryBatcher::VortexEmbeddingQueryBatcher(uint64_t emb_dim,uint64_t size_hint){
+    this->emb_dim = emb_dim;
+    metadata_size = sizeof(uint32_t) * 5;
+    query_emb_size = sizeof(float) * emb_dim;
+    
+    queries.reserve(size_hint);
+}
+
+void VortexEmbeddingQueryBatcher::add_query(queued_query_t &queued_query){
+    queries.emplace_back(queued_query);
+}
+
+void VortexEmbeddingQueryBatcher::add_query(query_id_t query_id,uint32_t node_id,std::shared_ptr<float> query_emb,std::shared_ptr<std::string> query_text){
+    queued_query_t queued_query(query_id,node_id,query_emb,query_text);
+    add_query(queued_query);
+}
+
+void VortexEmbeddingQueryBatcher::serialize(){
+    query_index.clear();
+    uint32_t total_size = 0;
+
+    // compute the number of bytes each query will take in the buffer
+    for(auto& queued_query : queries){
+        query_id_t query_id = std::get<0>(queued_query);
+        const std::string& query_txt = *std::get<3>(queued_query);
+
+        uint32_t query_text_size = mutils::bytes_size(query_txt);
+        total_size += query_text_size + metadata_size + query_emb_size;
+        query_index[query_id] = query_text_size; // save this here temporarily
+    }
+
+    total_size += mutils::bytes_size(query_index); // total buffer size
+
+    // use a lambda to build buffer, to avoid a copy
+    blob = std::make_shared<derecho::cascade::Blob>([&](uint8_t* buffer,const std::size_t size){
+            uint32_t metadata_position = mutils::bytes_size(query_index); // position to start writing metadata
+            uint32_t embeddings_position = metadata_position + (queries.size() * metadata_size); // position to start writing the embeddings
+            uint32_t text_position = embeddings_position + (queries.size() * query_emb_size); // position to start writing the query texts
+
+            // write each query to the buffer, starting at buffer_position
+            for(auto& queued_query : queries){
+                query_id_t query_id = std::get<0>(queued_query);
+                uint32_t node_id = std::get<1>(queued_query);
+                const float* query_emb = std::get<2>(queued_query).get();
+                const std::string& query_txt = *std::get<3>(queued_query);
+
+                uint32_t query_text_size = query_index[query_id];
+                query_index[query_id] = metadata_position; // update with the position where the metadata for this query is
+
+                // write metadata: node_id, query_text_position, query_text_size, embeddings_position, query_emb_size
+                uint32_t metadata_array[5] = {node_id,text_position,query_text_size,embeddings_position,query_emb_size};
+                std::memcpy(buffer+metadata_position,metadata_array,metadata_size);
+
+                // write embeddings
+                std::memcpy(buffer+embeddings_position,query_emb,query_emb_size);
+                
+                // write text
+                mutils::to_bytes(query_txt,buffer+text_position);
+               
+                // update position for the next 
+                metadata_position += metadata_size;
+                embeddings_position += query_emb_size;
+                text_position += query_text_size;
+            }
+
+            // write index
+            mutils::to_bytes(query_index,buffer);
+
+            return size;
+        },total_size);
+}
+
+std::shared_ptr<derecho::cascade::Blob> VortexEmbeddingQueryBatcher::get_blob(){
+    return blob;
+}
+
+void VortexEmbeddingQueryBatcher::reset(){
+    blob.reset();
+    queries.clear();
+    query_index.clear();
+}
+
+// ========================================
+
 
 std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list, uint32_t embedding_dim) {
      // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
