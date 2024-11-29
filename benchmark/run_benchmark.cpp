@@ -120,8 +120,8 @@ int main(int argc, char** argv){
         }
 
         uint64_t next_query_index = dataset.get_next_query_index();
-        const std::string& query_text = dataset.get_query(next_query_index);
-        const float* query_emb = dataset.get_embeddings(next_query_index);
+        auto query_text = dataset.get_query(next_query_index);
+        auto query_emb = dataset.get_embeddings(next_query_index);
         uint64_t query_id = vortex.query(query_text,query_emb);
         query_id_to_index[query_id] = next_query_index;
         

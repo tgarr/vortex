@@ -13,7 +13,6 @@
  */
 
 using query_id_t = uint64_t;
-using queued_query_t_tmp = std::tuple<query_id_t,const std::string *,const float *>; // TODO temporary: need this for the rest to compile
 using queued_query_t = std::tuple<query_id_t,uint32_t,std::shared_ptr<float>,std::shared_ptr<std::string>>; // query ID, client node ID, embeddings, query text
 
 class VortexEmbeddingQueryBatcher {
@@ -31,10 +30,11 @@ public:
     void add_query(queued_query_t &queued_query);
     void add_query(query_id_t query_id,uint32_t node_id,std::shared_ptr<float> query_emb,std::shared_ptr<std::string> query_text);
 
-    void serialize();
-
+    uint64_t size();
+    const std::vector<queued_query_t>& get_queries();
     std::shared_ptr<derecho::cascade::Blob> get_blob();
 
+    void serialize();
     void reset();
 };
 

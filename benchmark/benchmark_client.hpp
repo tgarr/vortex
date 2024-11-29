@@ -47,13 +47,13 @@ class VortexBenchmarkClient {
         std::mutex thread_mtx;
         std::condition_variable thread_signal;
 
-        std::queue<queued_query_t_tmp> query_queue;
+        std::queue<queued_query_t> query_queue;
 
         void main_loop();
 
     public:
         ClientThread(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim);
-        void push_query(queued_query_t_tmp &queued_query);
+        void push_query(queued_query_t &queued_query);
         void signal_stop();
         std::unordered_map<uint64_t,uint64_t> batch_size;
 
@@ -125,7 +125,7 @@ class VortexBenchmarkClient {
     
     void setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim,uint64_t num_result_threads);
    
-    uint64_t query(const std::string& query,const float* query_emb);
+    uint64_t query(std::shared_ptr<std::string> query,std::shared_ptr<float> query_emb);
     void wait_results();
     const std::vector<std::string>& get_result(query_id_t query_id);
     void dump_timestamps(bool dump_remote = true);

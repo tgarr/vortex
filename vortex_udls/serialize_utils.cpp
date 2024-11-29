@@ -82,6 +82,14 @@ void VortexEmbeddingQueryBatcher::serialize(){
         },total_size);
 }
 
+uint64_t VortexEmbeddingQueryBatcher::size(){
+    return queries.size();
+}
+
+const std::vector<queued_query_t>& VortexEmbeddingQueryBatcher::get_queries(){
+    return queries;
+}
+
 std::shared_ptr<derecho::cascade::Blob> VortexEmbeddingQueryBatcher::get_blob(){
     return blob;
 }

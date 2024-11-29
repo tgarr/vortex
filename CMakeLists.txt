@@ -51,7 +51,7 @@ set(LOG_TAG_QUERIES_SENDING_START 10000)
 set(LOG_TAG_QUERIES_SENDING_END 10001)
 set(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED 10100)
 
-add_executable(run_benchmark benchmark/benchmark_client.cpp benchmark/run_benchmark.cpp benchmark/benchmark_dataset.cpp)
+add_executable(run_benchmark benchmark/benchmark_client.cpp benchmark/run_benchmark.cpp benchmark/benchmark_dataset.cpp vortex_udls/serialize_utils.cpp)
 target_link_libraries(run_benchmark derecho::cascade)
 target_compile_definitions(run_benchmark PRIVATE
     LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}

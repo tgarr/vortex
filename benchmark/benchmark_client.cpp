@@ -101,9 +101,9 @@ query_id_t VortexBenchmarkClient::next_query_id(){
     return query_id;
 }
 
-uint64_t VortexBenchmarkClient::query(const std::string& query,const float* query_emb){
+uint64_t VortexBenchmarkClient::query(std::shared_ptr<std::string> query,std::shared_ptr<float> query_emb){
     query_id_t query_id = VortexBenchmarkClient::next_query_id();
-    queued_query_t_tmp new_query(query_id,&query,query_emb);
+    queued_query_t new_query(query_id,my_id,query_emb,query);
     client_thread->push_query(new_query);
     return query_id;
 }
@@ -173,7 +173,7 @@ VortexBenchmarkClient::ClientThread::ClientThread(uint64_t batch_min_size,uint64
     this->emb_dim = emb_dim;
 }
 
-void VortexBenchmarkClient::ClientThread::push_query(queued_query_t_tmp &queued_query){
+void VortexBenchmarkClient::ClientThread::push_query(queued_query_t &queued_query){
     std::unique_lock<std::mutex> lock(thread_mtx);
     query_queue.push(queued_query);
     thread_signal.notify_all();
@@ -189,7 +189,7 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
     if(!running) return;
     
     // thread main loop
-    queued_query_t_tmp to_send[batch_max_size];
+    VortexEmbeddingQueryBatcher batcher(emb_dim,batch_max_size);
     auto wait_start = std::chrono::steady_clock::now();
     auto batch_time = std::chrono::microseconds(batch_time_us);
     uint64_t batch_id = 0;
@@ -211,7 +211,7 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
 
             // copy out queries
             for(uint64_t i=0;i<send_count;i++){
-                to_send[i] = query_queue.front();
+                batcher.add_query(query_queue.front());
                 query_queue.pop();
             }
         }
@@ -220,9 +220,13 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
 
         // now we are outside the locked region (i.e the client can continue adding queries to the queue): build object and call trigger_put
         if(send_count > 0){
+            batcher.serialize();
+
             ObjectWithStringKey obj;
             obj.key = UDL1_PATH "/client" + std::to_string(node_id) + "/qb" + std::to_string(batch_id); // batch_id is important for randomizing the shard that gets each batch
+            obj.blob = std::move(*batcher.get_blob());
 
+            /*
             // build Blob from queries in to_send
             
             std::unordered_map<query_id_t,uint32_t> query_index; // maps query_id to position in the buffer
@@ -280,13 +284,16 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
 
                     return size;
                 },total_size);
+            */
+
+            const std::vector<queued_query_t>& to_send = batcher.get_queries();
 
             for(uint64_t i=0;i<send_count;i++){
                 auto query_id = std::get<0>(to_send[i]);
                 TimestampLogger::log(LOG_TAG_QUERIES_SENDING_START,node_id,batch_id,i); // TODO update with just query_id
                 
                 std::unique_lock<std::shared_mutex> lock(map_mutex);
-                batched_query_to_index_and_id[batch_id][*std::get<1>(to_send[i])] = std::make_pair(i,query_id); // TODO this will not be necessary
+                batched_query_to_index_and_id[batch_id][*std::get<3>(to_send[i])] = std::make_pair(i,query_id); // TODO this will not be necessary
             }
 
             // trigger put
@@ -298,6 +305,8 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
 
             batch_size[batch_id] = send_count; // for statistics
             batch_id++;
+
+            batcher.reset();
         }
     }
 }
