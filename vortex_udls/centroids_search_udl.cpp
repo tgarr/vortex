@@ -152,6 +152,9 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::main_loop(DefaultCascadeCo
         });
         if (!running)
             break;
+        if (parent->active_tasks_queue.empty()) {
+            continue;
+        }
         std::unique_ptr<batchedTask> task = std::move(parent->active_tasks_queue.front());
         parent->active_tasks_queue.pop();
         lock.unlock();
