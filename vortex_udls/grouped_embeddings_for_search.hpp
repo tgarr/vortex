@@ -149,11 +149,11 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
       */
-     void search(int nq, float* xq, int top_k, float* D, long* I);
+     void search(int nq, const float* xq, int top_k, float* D, long* I);
 
      void initialize_cpu_hnsw_search();
 
-     int hnsw_cpu_search(int nq, float* xq, int top_k, float* D, long* I);
+     int hnsw_cpu_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /*** 
       * Initialize the CPU flat search index based on the embeddings.
@@ -170,7 +170,7 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
      ***/
-     int faiss_cpu_flat_search(int nq, float* xq, int top_k, float* D, long* I);
+     int faiss_cpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /*** 
       * Initialize the GPU flat search index based on the embeddings.
@@ -187,7 +187,7 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
      ***/
-     int faiss_gpu_flat_search(int nq, float* xq, int top_k, float* D, long* I);
+     int faiss_gpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /*** 
       * Initialize the GPU ivf search index based on the embeddings.
@@ -204,7 +204,7 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
      ***/
-     int faiss_gpu_ivf_flat_search(int nq, float* xq, int top_k, float* D, long* I);
+     int faiss_gpu_ivf_flat_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /***
       * Reset the GroupedEmbeddingsForSearch object

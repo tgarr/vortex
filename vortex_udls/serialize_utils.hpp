@@ -8,41 +8,103 @@
 #define CLUSTER_KEY_DELIMITER "_cluster"
 
 /* 
- * VortexEmbeddingQueryBatcher gathers and serializes queries with their embeddings to be sent to UDL1 and to UDL2.
+ * EmbeddingQuery encapsulates a single embedding query that is part of a batch. 
+ * Operations are performed on demand and directly from the buffer of the whole batch.
+ *
+ */
+
+class EmbeddingQuery {
+    std::shared_ptr<uint8_t> buffer;
+    uint64_t buffer_size;
+
+    uint64_t query_id;
+    uint32_t node_id,text_position,text_size,embeddings_position,embeddings_size;
+
+    std::shared_ptr<std::string> text;
+
+public:
+    EmbeddingQuery(std::shared_ptr<uint8_t> buffer,uint64_t buffer_size,uint64_t query_id,uint32_t metadata_position);
+    std::shared_ptr<std::string> get_text();
+    const float * get_embeddings_pointer();
+    const uint8_t * get_text_pointer();
+    uint32_t get_text_size();
+    uint64_t get_id();
+    uint32_t get_node();
+};
+
+/* 
+ * EmbeddingQueryBatchManager perform operations on the whole embedding query batch received from the client or UDL1.
+ * Such operations include getting all EmbeddingQuery that are in the batch, or getting all the embeddings for processing all in batch.
+ *
+ */
+
+class EmbeddingQueryBatchManager {
+    std::shared_ptr<uint8_t> buffer;
+    uint64_t buffer_size;
+    uint64_t emb_dim;
+
+    std::shared_ptr<std::unordered_map<uint64_t,uint32_t>> index;
+    std::vector<std::shared_ptr<EmbeddingQuery>> queries;
+    bool queries_sorted = false;
+
+    void create_queries();
+    void sort_queries();
+
+public:
+    EmbeddingQueryBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t emb_dim);
+    const std::vector<std::shared_ptr<EmbeddingQuery>>& get_queries(bool sorted = false);
+    uint64_t count();
+    const float * get_embeddings_pointer();
+    const uint8_t * get_text_pointer();
+};
+
+/* 
+ * EmbeddingQueryBatcher gathers and serializes queries with their embeddings to be sent to UDL1 and to UDL2.
  *
  */
 
 using query_id_t = uint64_t;
 using queued_query_t = std::tuple<query_id_t,uint32_t,std::shared_ptr<float>,std::shared_ptr<std::string>>; // query ID, client node ID, embeddings, query text
 
-class VortexEmbeddingQueryBatcher {
+class EmbeddingQueryBatcher {
     uint64_t emb_dim;
     uint32_t metadata_size;
     uint32_t query_emb_size;
+    bool from_buffered = false;
 
     std::vector<queued_query_t> queries;
+    std::vector<std::shared_ptr<EmbeddingQuery>> buffered_queries;
     std::shared_ptr<derecho::cascade::Blob> blob;
     std::unordered_map<query_id_t,uint32_t> query_index;
+    
+    void serialize_from_buffered();
+    void serialize_from_raw();
 
 public:
-    VortexEmbeddingQueryBatcher(uint64_t emb_dim,uint64_t size_hint = 1000);
+    EmbeddingQueryBatcher(uint64_t emb_dim,uint64_t size_hint = 1000);
 
     void add_query(queued_query_t &queued_query);
     void add_query(query_id_t query_id,uint32_t node_id,std::shared_ptr<float> query_emb,std::shared_ptr<std::string> query_text);
+    void add_query(std::shared_ptr<EmbeddingQuery> query); 
 
-    uint64_t size();
-    const std::vector<queued_query_t>& get_queries();
     std::shared_ptr<derecho::cascade::Blob> get_blob();
 
     void serialize();
     void reset();
 };
 
-
 /*
  * Helper functions
  *
  */
+
+std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str);
+
+
+
+// old functions below (maintaining for compatibility)
+
+
 
 std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list, uint32_t embedding_dim);
 

@@ -184,7 +184,7 @@ int GroupedEmbeddingsForSearch::initialize_groupped_embeddings_for_search(){
      return 0;
 }
 
-void GroupedEmbeddingsForSearch::search(int nq, float* xq, int top_k, float* D, long* I){
+void GroupedEmbeddingsForSearch::search(int nq, const float* xq, int top_k, float* D, long* I){
      switch (this->search_type) {
      case SearchType::FaissCpuFlatSearch:
           faiss_cpu_flat_search(nq, xq, top_k, D, I);
@@ -214,7 +214,7 @@ void GroupedEmbeddingsForSearch::initialize_cpu_hnsw_search() {
      }
 }
 
-int GroupedEmbeddingsForSearch::hnsw_cpu_search(int nq, float* xq, int top_k, float* D, long* I)  {
+int GroupedEmbeddingsForSearch::hnsw_cpu_search(int nq, const float* xq, int top_k, float* D, long* I)  {
      for(size_t i = 0; i < nq; i++) {
           const float* query_vector = xq + (i * this->emb_dim);
 
@@ -241,7 +241,7 @@ void GroupedEmbeddingsForSearch::initialize_cpu_flat_search(){
 }
 
 
-int GroupedEmbeddingsForSearch::faiss_cpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
+int GroupedEmbeddingsForSearch::faiss_cpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I){
      dbg_default_trace("FAISS CPU flat Search in [GroupedEmbeddingsForSearch] class");
      this->cpu_flatl2_index->search(nq, xq, top_k, D, I);
      return 0;
@@ -254,7 +254,7 @@ void GroupedEmbeddingsForSearch::initialize_gpu_flat_search(){
 }
 
 
-int GroupedEmbeddingsForSearch::faiss_gpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
+int GroupedEmbeddingsForSearch::faiss_gpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I){
      dbg_default_trace("FAISS GPU flatl2 Search in [GroupedEmbeddingsForSearch] class" );
      this->gpu_flatl2_index->search(nq, xq, top_k, D, I);
      return 0;
@@ -269,7 +269,7 @@ void GroupedEmbeddingsForSearch::initialize_gpu_ivf_flat_search(){
 }
 
 
-int GroupedEmbeddingsForSearch::faiss_gpu_ivf_flat_search(int nq, float* xq, int top_k, float* D, long* I){
+int GroupedEmbeddingsForSearch::faiss_gpu_ivf_flat_search(int nq, const float* xq, int top_k, float* D, long* I){
      dbg_default_trace("FAISS GPU ivf Search in [GroupedEmbeddingsForSearch] class" );
      this->gpu_ivf_flatl2_index->search(nq, xq, top_k, D, I);
      return 0;

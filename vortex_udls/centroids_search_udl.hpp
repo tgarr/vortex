@@ -22,56 +22,60 @@ std::string get_description() {
     return MY_DESC;
 }
 
-// TODO this is gonna be turned into one query (instead of the whole batch)
-struct batchedTask {
-    std::string key; // TODO remove: keeping for now for the sake of compatibility
-    uint32_t client_id;
-    uint32_t query_batch_id; // TODO remove: keeping for now for the sake of compatibility
-    Blob blob; // TODO this is probably going to be just a pointer to the buffer
-    // TODO add metadata
-
-    // std::vector<std::string> queries;
-    // // CURL *curl;
-    // std::unique_ptr<float[]> all_embeddings;
-    batchedTask(std::string key, uint32_t client_id, uint32_t query_batch_id, Blob blob)
-        : key(key), client_id(client_id), query_batch_id(query_batch_id), blob(blob) {}
-};
-
 class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
-
-    /***
-     * A thread class to compute topk centroids and emit to the next UDL
+    /* 
+     * This is a thread for searching centroids. We can use multiple of this to search in parallel
+     *
      */
-    class ProcessBatchedTasksThread {
+    class CentroidSearchThread {
         private:
             uint64_t my_thread_id;
             CentroidsSearchOCDPO* parent;
             std::thread real_thread;
-            
             bool running = false;
 
-            bool get_queries_and_emebddings(Blob* blob, 
-                                    float*& data, uint32_t& nq, 
-                                    std::vector<std::string>& query_list,
-                                    const uint32_t& client_id, 
-                                    const uint32_t& query_batch_id);
-            /***
-            * Combine subsets of queries that is going to send to the same cluster
-            *  A batching step that batches the results with the same cluster in their top_num_centroids search results
-            * @param I the indices of the top_num_centroids that are close to the queries
-            * @param nq the number of queries
-            * @param cluster_ids_to_query_ids a map from cluster_id to the list of query_ids that are close to the cluster
-            ***/
-            void combine_common_clusters(const long* I, const int nq, 
-                                    std::map<long, std::vector<int>>& cluster_ids_to_query_ids);
-            void process_task(std::unique_ptr<batchedTask> task_ptr, DefaultCascadeContextType* typed_ctxt);
+            std::condition_variable_any query_queue_cv;
+            std::mutex query_queue_mutex;
+            std::queue<std::shared_ptr<EmbeddingQuery>> query_queue;
+            
+            void main_loop();
+            std::unique_ptr<std::vector<uint64_t>> centroid_search(std::shared_ptr<EmbeddingQuery> &query);
+
+        public:
+            CentroidSearchThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl);
+            void start();
+            void join();
+            void signal_stop();
+
+            void push(std::shared_ptr<EmbeddingQuery> query);
+    };
+    
+    uint64_t num_search_threads = 1;
+    uint64_t next_search_thread = 0;
+    std::vector<std::unique_ptr<CentroidSearchThread>> search_threads;
+
+    /***
+     * This thread gathers queries in each cluster, batch them and emit to the next UDL
+     */
+    class BatchingThread {
+        private:
+            uint64_t my_thread_id;
+            CentroidsSearchOCDPO* parent;
+            std::thread real_thread;
+            bool running = false;
+
+            std::unordered_map<uint64_t,std::unique_ptr<std::vector<std::shared_ptr<EmbeddingQuery>>>> cluster_queue; // a queue for each cluster
+            std::condition_variable_any cluster_queue_cv;
+            std::mutex cluster_queue_mutex;
+
             void main_loop(DefaultCascadeContextType* typed_ctxt);
 
         public:
-            ProcessBatchedTasksThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl);
+            BatchingThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl);
             void start(DefaultCascadeContextType* typed_ctxt);
             void join();
             void signal_stop();
+            void push(std::shared_ptr<EmbeddingQuery> query,std::unique_ptr<std::vector<uint64_t>> clusters);
     };
 
     std::unique_ptr<GroupedEmbeddingsForSearch> centroids_embs;
@@ -84,15 +88,11 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     int top_num_centroids = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
     std::string emit_key_prefix = "/rag/emb/clusters_search";
-    
-    std::atomic<bool> new_request = false;
-    std::mutex active_tasks_mutex;
-    std::condition_variable active_tasks_cv;
-    std::queue<std::unique_ptr<batchedTask>> active_tasks_queue;
-
+    uint64_t min_batch_size = 1;
+    uint64_t max_batch_size = 10;
+    uint64_t batch_time_us = 1000;
     
     bool retrieve_and_cache_centroids_index(DefaultCascadeContextType* typed_ctxt);
-
 
     virtual void ocdpo_handler(const node_id_t sender,
                                const std::string& object_pool_pathname,
@@ -104,9 +104,8 @@ class CentroidsSearchOCDPO: public DefaultOffCriticalDataPathObserver {
 
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
 
-
 public:
-    std::unique_ptr<ProcessBatchedTasksThread> process_batched_tasks_thread;
+    std::unique_ptr<BatchingThread> batch_thread;
     static void initialize() {
         if(!ocdpo_ptr) {
             ocdpo_ptr = std::make_shared<CentroidsSearchOCDPO>();
