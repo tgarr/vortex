@@ -124,47 +124,66 @@ void CentroidsSearchOCDPO::BatchingThread::main_loop(DefaultCascadeContextType* 
     // TODO timestamp logging in this method should be revisited
     
     std::unique_lock<std::mutex> lock(cluster_queue_mutex, std::defer_lock);
-    // TODO batch_time for each cluster
+    std::unordered_map<uint64_t,std::chrono::steady_clock::time_point> wait_time;
+    auto batch_time = std::chrono::microseconds(parent->batch_time_us);
     while (running) {
         lock.lock();
-        /*parent->active_tasks_cv.wait(lock, [&] { 
-            return parent->new_request || !parent->active_tasks_queue.empty() || !running; 
-        });
-        if (parent->active_tasks_queue.empty()) {
-            continue;
+        bool empty = true;
+        for(auto& item : cluster_queue){
+            if(!(item.second->empty())){
+                empty = false;
+                break;
+            }
         }
-        */
+
+        if(empty){
+            cluster_queue_cv.wait_for(lock,batch_time);
+        }
         
         if (!running) break;
 
         // move queue pointers out of the map and replace with empty vectors
         std::unordered_map<uint64_t,std::unique_ptr<std::vector<std::shared_ptr<EmbeddingQuery>>>> to_send;
+        auto now = std::chrono::steady_clock::now();
         for(auto& item : cluster_queue){
-            // TODO min size or time
+            if(wait_time.count(item.first) == 0){
+                wait_time[item.first] = now;
+            }
 
-            to_send[item.first] = std::move(item.second);
-            item.second = std::make_unique<std::vector<std::shared_ptr<EmbeddingQuery>>>();
-            item.second->reserve(parent->max_batch_size);
+            if((item.second->size() >= parent->min_batch_size) || ((now-wait_time[item.first]) >= batch_time)){
+                to_send[item.first] = std::move(item.second);
+                item.second = std::make_unique<std::vector<std::shared_ptr<EmbeddingQuery>>>();
+                item.second->reserve(parent->max_batch_size);
+            }
         }
         
         lock.unlock();
 
         auto num_shards = typed_ctxt->get_service_client_ref().get_number_of_shards<VolatileCascadeStoreWithStringKey>(NEXT_UDL_SUBGROUP_ID);
 
-        // TODO serialize and send batches
+        // serialize and send batches
         for(auto& item : to_send){
-            // TODO enforce maximum batch size
-            EmbeddingQueryBatcher batcher(parent->emb_dim,item.second->size());
-            for(auto& query : *(item.second)){
-                batcher.add_query(query);
+            uint64_t num_sent = 0;
+            uint64_t total = item.second->size();
+            // send in batches of maximum max_batch_size queries
+            while(num_sent < total){
+                uint64_t left = total - num_sent;
+                uint64_t batch_size = std::min(parent->max_batch_size,left);
+
+                EmbeddingQueryBatcher batcher(parent->emb_dim,batch_size);
+                for(uint64_t i=num_sent;i<(num_sent+batch_size);i++){
+                    batcher.add_query(item.second->at(i));
+                }
+                batcher.serialize();
+
+                ObjectWithStringKey obj;
+                obj.key = parent->emit_key_prefix + "/cluster" + std::to_string(item.first);
+                obj.blob = std::move(*batcher.get_blob());
+
+                typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(item.first) % num_shards, true);
+
+                num_sent += batch_size;
             }
-            batcher.serialize();
-
-            ObjectWithStringKey obj;
-            obj.key = parent->emit_key_prefix + "/cluster" + std::to_string(item.first);
-            obj.blob = std::move(*batcher.get_blob());
-
-            typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(item.first) % num_shards, true);
         }
         
         // TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id); // TODO this should go somewhere else
