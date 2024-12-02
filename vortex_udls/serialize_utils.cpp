@@ -12,7 +12,8 @@
 
 EmbeddingQueryBatcher::EmbeddingQueryBatcher(uint64_t emb_dim,uint64_t size_hint){
     this->emb_dim = emb_dim;
-    metadata_size = sizeof(uint32_t) * 5;
+    metadata_size = sizeof(uint32_t) * 5 + sizeof(query_id_t);
+    header_size = sizeof(uint32_t) * 2;
     query_emb_size = sizeof(float) * emb_dim;
     
     queries.reserve(size_hint);
@@ -43,38 +44,41 @@ void EmbeddingQueryBatcher::serialize(){
 }
     
 void EmbeddingQueryBatcher::serialize_from_buffered(){
-    query_index.clear();
-    uint32_t total_size = 0;
+    num_queries = buffered_queries.size();
+    total_text_size = 0;
+    uint32_t total_size = header_size; // header: num_queries, embeddings_start_position
 
     // compute the number of bytes each query will take in the buffer
     for(auto& query : buffered_queries){
         query_id_t query_id = query->get_id();
         uint32_t query_text_size = query->get_text_size();
         total_size += query_text_size + metadata_size + query_emb_size;
-        query_index[query_id] = query_text_size; // save this here temporarily
+        total_text_size += query_text_size;
+        text_size[query_id] = query_text_size;
     }
-
-    total_size += mutils::bytes_size(query_index); // total buffer size
 
     // use a lambda to build buffer, to avoid a copy
     blob = std::make_shared<derecho::cascade::Blob>([&](uint8_t* buffer,const std::size_t size){
-            uint32_t metadata_position = mutils::bytes_size(query_index); // position to start writing metadata
-            uint32_t embeddings_position = metadata_position + (buffered_queries.size() * metadata_size); // position to start writing the embeddings
-            uint32_t text_position = embeddings_position + (buffered_queries.size() * query_emb_size); // position to start writing the query texts
-
+            uint32_t metadata_position = header_size; // position to start writing metadata
+            uint32_t text_position = metadata_position + (num_queries * metadata_size); // position to start writing the query texts
+            uint32_t embeddings_position = text_position + total_text_size; // position to start writing the embeddings
+            
+            // write header
+            uint32_t header[2] = {num_queries,embeddings_position};
+            std::memcpy(buffer,header,header_size);
+            
             // write each query to the buffer, starting at buffer_position
             for(auto& query : buffered_queries){
                 query_id_t query_id = query->get_id();
                 uint32_t node_id = query->get_node();
                 const float* query_emb = query->get_embeddings_pointer();
                 const uint8_t * text_data = query->get_text_pointer();
+                uint32_t query_text_size = text_size[query_id];
 
-                uint32_t query_text_size = query_index[query_id];
-                query_index[query_id] = metadata_position; // update with the position where the metadata for this query is
-
-                // write metadata: node_id, query_text_position, query_text_size, embeddings_position, query_emb_size
+                // write metadata: query_id, node_id, query_text_position, query_text_size, embeddings_position, query_emb_size
                 uint32_t metadata_array[5] = {node_id,text_position,query_text_size,embeddings_position,query_emb_size};
-                std::memcpy(buffer+metadata_position,metadata_array,metadata_size);
+                std::memcpy(buffer+metadata_position,&query_id,sizeof(query_id_t));
+                std::memcpy(buffer+metadata_position+sizeof(query_id_t),metadata_array,metadata_size-sizeof(query_id_t));
 
                 // write embeddings
                 std::memcpy(buffer+embeddings_position,query_emb,query_emb_size);
@@ -88,16 +92,14 @@ void EmbeddingQueryBatcher::serialize_from_buffered(){
                 text_position += query_text_size;
             }
 
-            // write index
-            mutils::to_bytes(query_index,buffer);
-
             return size;
         },total_size);
 }
 
 void EmbeddingQueryBatcher::serialize_from_raw(){
-    query_index.clear();
-    uint32_t total_size = 0;
+    num_queries = queries.size();
+    total_text_size = 0;
+    uint32_t total_size = header_size; // header: num_queries, embeddings_start_position
 
     // compute the number of bytes each query will take in the buffer
     for(auto& queued_query : queries){
@@ -105,17 +107,20 @@ void EmbeddingQueryBatcher::serialize_from_raw(){
         const std::string& query_txt = *std::get<3>(queued_query);
 
         uint32_t query_text_size = mutils::bytes_size(query_txt);
+        total_text_size += query_text_size;
         total_size += query_text_size + metadata_size + query_emb_size;
-        query_index[query_id] = query_text_size; // save this here temporarily
+        text_size[query_id] = query_text_size;
     }
-
-    total_size += mutils::bytes_size(query_index); // total buffer size
 
     // use a lambda to build buffer, to avoid a copy
     blob = std::make_shared<derecho::cascade::Blob>([&](uint8_t* buffer,const std::size_t size){
-            uint32_t metadata_position = mutils::bytes_size(query_index); // position to start writing metadata
-            uint32_t embeddings_position = metadata_position + (queries.size() * metadata_size); // position to start writing the embeddings
-            uint32_t text_position = embeddings_position + (queries.size() * query_emb_size); // position to start writing the query texts
+            uint32_t metadata_position = header_size; // position to start writing metadata
+            uint32_t text_position = metadata_position + (num_queries * metadata_size); // position to start writing the query texts
+            uint32_t embeddings_position = text_position + total_text_size; // position to start writing the embeddings
+             
+            // write header
+            uint32_t header[2] = {num_queries,embeddings_position};
+            std::memcpy(buffer,header,header_size);
 
             // write each query to the buffer, starting at buffer_position
             for(auto& queued_query : queries){
@@ -123,13 +128,12 @@ void EmbeddingQueryBatcher::serialize_from_raw(){
                 uint32_t node_id = std::get<1>(queued_query);
                 const float* query_emb = std::get<2>(queued_query).get();
                 const std::string& query_txt = *std::get<3>(queued_query);
+                uint32_t query_text_size = text_size[query_id];
 
-                uint32_t query_text_size = query_index[query_id];
-                query_index[query_id] = metadata_position; // update with the position where the metadata for this query is
-
-                // write metadata: node_id, query_text_position, query_text_size, embeddings_position, query_emb_size
+                // write metadata: query_id, node_id, query_text_position, query_text_size, embeddings_position, query_emb_size
                 uint32_t metadata_array[5] = {node_id,text_position,query_text_size,embeddings_position,query_emb_size};
-                std::memcpy(buffer+metadata_position,metadata_array,metadata_size);
+                std::memcpy(buffer+metadata_position,&query_id,sizeof(query_id_t));
+                std::memcpy(buffer+metadata_position+sizeof(query_id_t),metadata_array,metadata_size-sizeof(query_id_t));
 
                 // write embeddings
                 std::memcpy(buffer+embeddings_position,query_emb,query_emb_size);
@@ -143,9 +147,6 @@ void EmbeddingQueryBatcher::serialize_from_raw(){
                 text_position += query_text_size;
             }
 
-            // write index
-            mutils::to_bytes(query_index,buffer);
-
             return size;
         },total_size);
 }
@@ -158,7 +159,7 @@ void EmbeddingQueryBatcher::reset(){
     blob.reset();
     queries.clear();
     buffered_queries.clear();
-    query_index.clear();
+    text_size.clear();
 }
 
 /*
@@ -171,7 +172,7 @@ EmbeddingQuery::EmbeddingQuery(std::shared_ptr<uint8_t> buffer,uint64_t buffer_s
     this->query_id = query_id;
 
     // get metadata
-    const uint32_t *metadata = reinterpret_cast<uint32_t*>(buffer.get()+metadata_position);
+    const uint32_t *metadata = reinterpret_cast<uint32_t*>(buffer.get()+metadata_position+sizeof(query_id_t));
     node_id = metadata[0];
     text_position = metadata[1];
     text_size = metadata[2];
@@ -188,6 +189,10 @@ std::shared_ptr<std::string> EmbeddingQuery::get_text(){
 }
 
 const float * EmbeddingQuery::get_embeddings_pointer(){
+    if(embeddings_position >= buffer_size){
+        return nullptr;
+    }
+
     return reinterpret_cast<float*>(buffer.get()+embeddings_position);
 }
 
@@ -212,60 +217,56 @@ uint32_t EmbeddingQuery::get_node(){
  * EmbeddingQueryBatchManager implementation
  */
 
-EmbeddingQueryBatchManager::EmbeddingQueryBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t emb_dim){
-    std::shared_ptr<uint8_t> copy(new uint8_t[buffer_size]);
-    std::memcpy(copy.get(),buffer,buffer_size);
-    
-    this->buffer = std::move(copy);
-    this->buffer_size = buffer_size;
+EmbeddingQueryBatchManager::EmbeddingQueryBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t emb_dim,bool copy_embeddings){
     this->emb_dim = emb_dim;
-
-    // deserialize index
-    this->index = mutils::from_bytes<std::unordered_map<uint64_t,uint32_t>>(nullptr,buffer);
-}
-
-const std::vector<std::shared_ptr<EmbeddingQuery>>& EmbeddingQueryBatchManager::get_queries(bool sorted){
-    if(queries.empty()){
-        create_queries();
+    this->copy_embeddings = copy_embeddings;
+    
+    const uint32_t *header = reinterpret_cast<const uint32_t *>(buffer);
+    this->num_queries = header[0];
+    this->embeddings_position = header[1];
+    
+    this->header_size = sizeof(uint32_t) * 2;
+    this->metadata_size = sizeof(uint32_t) * 5 + sizeof(query_id_t);
+    this->text_position = this->header_size + (this->metadata_size * this->num_queries);
+    this->embeddings_size = buffer_size - this->embeddings_position;
+   
+    if(copy_embeddings){
+        this->buffer_size = buffer_size;
+    } else {
+        this->buffer_size = buffer_size - this->embeddings_size;
     }
 
-    if(sorted && (!queries_sorted)){
-        sort_queries();
+    std::shared_ptr<uint8_t> copy(new uint8_t[this->buffer_size]);
+    std::memcpy(copy.get(),buffer,this->buffer_size);
+    this->buffer = std::move(copy);
+}
+
+const std::vector<std::shared_ptr<EmbeddingQuery>>& EmbeddingQueryBatchManager::get_queries(){
+    if(queries.empty()){
+        create_queries();
     }
 
     return queries;
 }
 
 uint64_t EmbeddingQueryBatchManager::count(){
-    return index->size();
+    return num_queries;
 }
 
-const float * EmbeddingQueryBatchManager::get_embeddings_pointer(){
-    uint32_t metadata_size = sizeof(uint32_t) * 5;
-    uint32_t metadata_position = mutils::bytes_size(*index);
-    uint32_t embeddings_position = metadata_position + (index->size() * metadata_size);
-    return reinterpret_cast<float*>(buffer.get()+embeddings_position);
+uint32_t EmbeddingQueryBatchManager::get_embeddings_position(uint32_t start){
+    return embeddings_position + (start * (emb_dim * sizeof(float)));
 }
 
-const uint8_t * EmbeddingQueryBatchManager::get_text_pointer(){
-    uint32_t metadata_size = sizeof(uint32_t) * 5;
-    uint32_t query_emb_size = sizeof(float) * emb_dim;
-    uint32_t metadata_position = mutils::bytes_size(*index);
-    uint32_t embeddings_position = metadata_position + (index->size() * metadata_size);
-    uint32_t text_position = embeddings_position + (index->size() * query_emb_size);
-    return buffer.get()+text_position;
+uint32_t EmbeddingQueryBatchManager::get_embeddings_size(uint32_t start){
+    return this->embeddings_size - (start * (emb_dim * sizeof(float)));
 }
 
 void EmbeddingQueryBatchManager::create_queries(){
-    for(auto& item : *index){
-        queries.emplace_back(new EmbeddingQuery(buffer,buffer_size,item.first,item.second));
+    for(uint32_t i=0;i<num_queries;i++){
+        uint32_t metadata_position = header_size + (i * metadata_size);
+        query_id_t query_id = *reinterpret_cast<query_id_t*>(buffer.get()+metadata_position);
+        queries.emplace_back(new EmbeddingQuery(buffer,buffer_size,query_id,metadata_position));
     }
-}
-
-void EmbeddingQueryBatchManager::sort_queries(){
-    std::sort(queries.begin(),queries.end(),[&](const std::shared_ptr<EmbeddingQuery>& l, const std::shared_ptr<EmbeddingQuery>& r){
-            return index->at(l->get_id()) < index->at(r->get_id());
-        });
 }
 
 /*
@@ -280,8 +281,9 @@ std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str){
     return std::make_pair(client_id,batch_id);
 }
 
-
-
+uint64_t parse_cluster_id(const std::string &str){
+    return std::stoull(str.substr(8)); // str is '/cluster[0-9]+'
+}
 
 // old stuff below ========================================
 

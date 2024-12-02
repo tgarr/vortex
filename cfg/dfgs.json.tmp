@@ -35,8 +35,12 @@
                         "emb_dim":1024,
                         "top_k":3,
                         "faiss_search_type":0,
+                        "min_batch_size":1,
+                        "max_batch_size":100,
                         "batch_time_us":1000,
-                        "batch_min_size":1,
+                        "min_process_batch_size":1,
+                        "max_process_batch_size":10,
+                        "process_batch_time_us":1000,
                         "num_threads":1
                 }],
                 "destinations": [{"/rag/generate/agg":"put"}]

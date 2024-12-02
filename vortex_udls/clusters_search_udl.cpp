@@ -88,7 +88,7 @@ void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(Defau
 
     size_t num_queries = query_buffer->count_queries();
     for (size_t start_idx = 0; start_idx < num_queries; start_idx += parent->max_batch_size) {
-        size_t cur_batch_size = std::min(parent->max_batch_size, num_queries - start_idx);
+        size_t cur_batch_size = std::min(static_cast<size_t>(parent->max_batch_size), num_queries - start_idx);
         // 1. perform batched ANN search
         long* I = new long[parent->top_k * cur_batch_size];
         float* D = new float[parent->top_k * cur_batch_size];
@@ -234,17 +234,15 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
                                const emit_func_t& emit,
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) {
+    // TODO timestamp logging need to be revisited
+
     /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
     dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
+    
     // 0. parse the key, get the cluster ID
-    int parsed_cluster_id;
-    bool extracted_clusterid = parse_number(key_string, CLUSTER_KEY_DELIMITER, parsed_cluster_id); 
-    if (!extracted_clusterid) {
-        std::cerr << "Error: cluster ID not found in the key_string" << std::endl;
-        dbg_default_error("Failed to find cluster ID from key: {}, at clusters_search_udl.", key_string);
-        return;
-    }
+    uint64_t parsed_cluster_id = parse_cluster_id(key_string);
 
+    // TODO do we need to enforce the cluster ID here ? it could work for any cluster
     if (this->cluster_id == -1) {
         this->cluster_id = parsed_cluster_id;
     } else if (this->cluster_id != parsed_cluster_id) {
@@ -252,16 +250,16 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
         dbg_default_error("Cluster ID mismatched, at clusters_search_udl.");
         return;
     }
-    int client_id = -1;
-    int query_batch_id = -1;
-    bool usable_logging_key = parse_batch_id(key_string, client_id, query_batch_id); // Logging purpose
-    if (!usable_logging_key)
-        dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
-    TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,client_id,query_batch_id,parsed_cluster_id);
-    // 1. Move the object to the active queue to be processed
-    this->cluster_search_threads[next_thread]->push_to_query_buffer(parsed_cluster_id, object.blob, key_string);
-    dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue on thread{}.", key_string, next_thread);
+
+    TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,0,parsed_cluster_id);
+    
+    std::unique_ptr<EmbeddingQueryBatchManager> batch_manager = std::make_unique<EmbeddingQueryBatchManager>(object.blob.bytes,object.blob.size,emb_dim,false);
+    
+    // 1. Add queries to the to the appropriate queue in the next thread
+    this->cluster_search_threads[next_thread]->push_to_query_buffer(parsed_cluster_id, std::move(batch_manager));
     next_thread = (next_thread + 1) % this->num_threads; // cycle
+    
+    dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue on thread {}.", key_string, next_thread);
 }
 
 
@@ -295,6 +293,15 @@ void ClustersSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, cons
         }
         if (config.contains("max_batch_size")) {
             this->max_batch_size = config["max_batch_size"].get<uint32_t>();
+        }
+        if (config.contains("min_process_batch_size")) {
+            this->min_process_batch_size = config["min_process_batch_size"].get<uint32_t>();
+        }
+        if (config.contains("max_process_batch_size")) {
+            this->max_process_batch_size = config["max_process_batch_size"].get<uint32_t>();
+        }
+        if (config.contains("process_batch_time_us")) {
+            this->process_batch_time_us = config["process_batch_time_us"].get<uint32_t>();
         }
         // Currenlty only support multithreading for hnswlib search, as GPU flat search requires cuda streams for host side parallelism
         if (config.contains("num_threads") && static_cast<GroupedEmbeddingsForSearch::SearchType>(this->faiss_search_type) == GroupedEmbeddingsForSearch::SearchType::HnswlibCpuSearch) {

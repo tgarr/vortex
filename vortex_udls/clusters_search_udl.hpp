@@ -106,9 +106,15 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     uint32_t top_k = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
     int my_id; // the node id of this node; logging purpose
-    uint32_t batch_time_us = 1000; // the time interval to process the batch of queries
-    size_t min_batch_size = 1; // min number queries to process in each batch
-    size_t max_batch_size = 1000; // max number queries to process in each batch, for hnsw search, set it to 1 is optimal
+    uint32_t min_batch_size = 1; // min number of queries to send down the pipeline
+    uint32_t max_batch_size = 100; // max number of queries to send down the pipeline
+    uint32_t batch_time_us = 1000; // the time to wait for the minimum batch size
+    uint32_t min_process_batch_size = 1; // min number of queries to process in each batch
+    uint32_t max_process_batch_size = 10; // max number of queries to process in each batch
+                                          // for hnsw search, set it to a small value (e.g. 1 to 10): the goal is to better distribute the queries across threads
+                                          // for GPU-based search, set it to a big value (e.g. 100s to 1000s): the goal is to better utilize GPU memory and cores
+    uint32_t process_batch_time_us = 1000; // the time to wait for the minimum process batch
+
     int num_threads = 1; // number of threads to process the cluster search
     uint64_t next_thread = 0;
 

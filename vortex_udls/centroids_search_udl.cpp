@@ -112,8 +112,13 @@ void CentroidsSearchOCDPO::BatchingThread::signal_stop() {
 
 void CentroidsSearchOCDPO::BatchingThread::push(std::shared_ptr<EmbeddingQuery> query,std::unique_ptr<std::vector<uint64_t>> clusters){
     std::unique_lock<std::mutex> lock(cluster_queue_mutex);
-
+        
     for(auto cluster_id : *clusters){
+        if(cluster_queue.count(cluster_id) == 0){
+            cluster_queue[cluster_id] = std::make_unique<std::vector<std::shared_ptr<EmbeddingQuery>>>();
+            cluster_queue[cluster_id]->reserve(parent->max_batch_size);
+        }
+
         cluster_queue[cluster_id]->push_back(query);
     }
 
@@ -245,13 +250,13 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
 
     // create the manager for this batch: this will copy the buffer from the object blob and deserialize the index, so we can create the individual queries wrappers
     std::unique_ptr<EmbeddingQueryBatchManager> batch_manager = std::make_unique<EmbeddingQueryBatchManager>(object.blob.bytes,object.blob.size,emb_dim);
-
+    
     // send queries to worker threads
     for(auto& query : batch_manager->get_queries()){
         search_threads[next_search_thread]->push(query);
         next_search_thread = (next_search_thread + 1) % num_search_threads;
     }
-    
+        
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,client_id,batch_id,this->my_id);
     dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", key_string);
 }

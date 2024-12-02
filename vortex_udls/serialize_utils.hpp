@@ -42,20 +42,25 @@ class EmbeddingQueryBatchManager {
     std::shared_ptr<uint8_t> buffer;
     uint64_t buffer_size;
     uint64_t emb_dim;
+    uint32_t num_queries;
+    uint32_t embeddings_position;
+    uint32_t text_position; // TODO may not be necessary
+    bool copy_embeddings = true;
 
-    std::shared_ptr<std::unordered_map<uint64_t,uint32_t>> index;
+    uint32_t header_size;
+    uint32_t metadata_size;
+    uint32_t embeddings_size;
+
     std::vector<std::shared_ptr<EmbeddingQuery>> queries;
-    bool queries_sorted = false;
-
+    
     void create_queries();
-    void sort_queries();
 
 public:
-    EmbeddingQueryBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t emb_dim);
-    const std::vector<std::shared_ptr<EmbeddingQuery>>& get_queries(bool sorted = false);
+    EmbeddingQueryBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t emb_dim,bool copy_embeddings = true);
+    const std::vector<std::shared_ptr<EmbeddingQuery>>& get_queries();
     uint64_t count();
-    const float * get_embeddings_pointer();
-    const uint8_t * get_text_pointer();
+    uint32_t get_embeddings_position(uint32_t start = 0); // get the position of the embeddings in the buffer, starting at the query at position start
+    uint32_t get_embeddings_size(uint32_t start = 0); // get the size of the embeddings buffer, starting at the query at position start
 };
 
 /* 
@@ -69,13 +74,16 @@ using queued_query_t = std::tuple<query_id_t,uint32_t,std::shared_ptr<float>,std
 class EmbeddingQueryBatcher {
     uint64_t emb_dim;
     uint32_t metadata_size;
+    uint32_t header_size;
     uint32_t query_emb_size;
+    uint32_t num_queries = 0;
+    uint32_t total_text_size = 0;
     bool from_buffered = false;
+    std::unordered_map<query_id_t,uint32_t> text_size;
 
     std::vector<queued_query_t> queries;
     std::vector<std::shared_ptr<EmbeddingQuery>> buffered_queries;
     std::shared_ptr<derecho::cascade::Blob> blob;
-    std::unordered_map<query_id_t,uint32_t> query_index;
     
     void serialize_from_buffered();
     void serialize_from_raw();
@@ -98,8 +106,8 @@ public:
  *
  */
 
-std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str);
-
+std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str); // at UDL1
+uint64_t parse_cluster_id(const std::string &str); // at UDL2
 
 
 // old functions below (maintaining for compatibility)
