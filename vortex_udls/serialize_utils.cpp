@@ -257,8 +257,12 @@ uint32_t EmbeddingQueryBatchManager::get_embeddings_position(uint32_t start){
     return embeddings_position + (start * (emb_dim * sizeof(float)));
 }
 
-uint32_t EmbeddingQueryBatchManager::get_embeddings_size(uint32_t start){
-    return this->embeddings_size - (start * (emb_dim * sizeof(float)));
+uint32_t EmbeddingQueryBatchManager::get_embeddings_size(uint32_t num){
+    if(num == 0){
+        return this->embeddings_size;
+    }
+
+    return num * emb_dim * sizeof(float);
 }
 
 void EmbeddingQueryBatchManager::create_queries(){

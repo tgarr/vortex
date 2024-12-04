@@ -9,179 +9,137 @@
 namespace derecho{
 namespace cascade{
 
-
 ClustersSearchOCDPO::ClusterSearchWorker::ClusterSearchWorker(uint64_t thread_id, 
                                         ClustersSearchOCDPO* parent_udl)
         : my_thread_id(thread_id), parent(parent_udl), running(false){
-    use_shadow_flag = 0;
-    query_buffer = std::make_unique<queryQueue>(parent->emb_dim);
-    shadow_query_buffer = std::make_unique<queryQueue>(parent->emb_dim);
+    // pre-allocate batch buffers
+    pending_batches.reserve(INITIAL_PENDING_BATCHES);
+    for(uint64_t i=0;i<INITIAL_PENDING_BATCHES;i++){
+        PendingEmbeddingQueryBatch *pending_batch = new PendingEmbeddingQueryBatch(parent->emb_dim,parent->max_process_batch_size);
+        pending_batches.emplace_back(pending_batch);
+    }
 }
 
+void ClustersSearchOCDPO::ClusterSearchWorker::push_queries(uint64_t cluster_id, std::unique_ptr<EmbeddingQueryBatchManager> batch_manager,const uint8_t *buffer){
+    const std::vector<std::shared_ptr<EmbeddingQuery>>& queries = batch_manager->get_queries();
+    uint64_t num_queries = batch_manager->count();
+    uint64_t queries_added = 0;
 
-void ClustersSearchOCDPO::ClusterSearchWorker::construct_new_keys(std::vector<std::string>& new_keys,
-                                        std::vector<std::string>::const_iterator keys_begin,
-                                        std::vector<std::string>::const_iterator keys_end,
-                                        std::vector<std::string>::const_iterator queries_begin,
-                                        std::vector<std::string>::const_iterator queries_end) {
-    auto key_it = keys_begin;
-    auto query_it = queries_begin;
+    std::unique_lock<std::mutex> lock(query_buffer_mutex);
 
-    while (key_it != keys_end ) {
-        try {
-            uint8_t digest[32];
-            openssl::Hasher sha256(openssl::DigestAlgorithm::SHA256);
-            const char* query_cstr = query_it->c_str();
-            sha256.hash_bytes(query_cstr, strlen(query_cstr), digest);
-            // Convert digest to a hexadecimal string
-            std::ostringstream oss;
-            for (int i = 0; i < 32; ++i) {
-                // Output each byte as a decimal value (0-255) without any leading zeros
-                oss << std::dec << static_cast<int>(digest[i]);
+    // find the next free buffer and add the queries there (create a new one if no buffer has space) 
+    while(queries_added < num_queries){
+        // find the next free buffer
+        int64_t free_batch = next_batch;
+        uint64_t space_left = pending_batches[free_batch]->space_left();
+        while (space_left == 0){
+            // cycle to the next
+            free_batch = (free_batch + 1) % pending_batches.size();
+            if(free_batch == current_batch){ // skip the batch being currently processed
+                free_batch = (free_batch + 1) % pending_batches.size();
             }
-            std::string hashed_query = oss.str();
-            // Construct the new key
-            new_keys.emplace_back(*key_it + "_qid" + hashed_query);
-        } catch (openssl::openssl_error& ex) {
-            dbg_default_error(
-                "Unable to compute SHA256 of typename. string = {}, exception name = {}", *query_it, ex.what());
-            throw;
-        }
-        ++key_it;
-        ++query_it;
-    }
-    // Sanity check
-    if (key_it != keys_end || query_it != queries_end) {
-        dbg_default_error("Mismatched iterator ranges in construct_new_keys");
-        throw std::runtime_error("Mismatched iterator ranges in construct_new_keys");
-    }
-}
+            
+            if(free_batch >= next_batch){
+                break;
+            }
 
-
-/*** TODO: could batch the results, which are going to be send to the same shard */
-void ClustersSearchOCDPO::ClusterSearchWorker::emit_results(DefaultCascadeContextType* typed_ctxt,
-                                                    const std::vector<std::string>& new_keys,
-                                                    const std::vector<std::string>& query_list,
-                                                    long* I, float* D, size_t start_idx, size_t batch_size) {
-    for (size_t k = 0; k < batch_size; ++k) {
-        ObjectWithStringKey obj;
-        obj.key = std::string(EMIT_AGGREGATE_PREFIX) + "/" + new_keys[k];
-        std::string query_emit_content = serialize_cluster_search_result(parent->top_k, I, D, k, query_list[start_idx + k]);
-        obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emit_content.c_str()), query_emit_content.size());
-        // logging purpose
-        // int client_id = -1, query_batch_id = -1;
-        // parse_batch_id(obj.key, client_id, query_batch_id);
-        // TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_EMIT_START, client_id, query_batch_id, this->cluster_id);
-        // emit result
-        typed_ctxt->get_service_client_ref().put_and_forget(obj,true);
-    }
-}
-
-void ClustersSearchOCDPO::ClusterSearchWorker::run_cluster_search_and_emit(DefaultCascadeContextType* typed_ctxt, 
-                                                                            queryQueue* query_buffer) {
-    // Check if the cluster search index is initialized
-    if (!parent->cluster_search_index->initialized_index.load()){
-        if(!parent->check_and_retrieve_cluster_index(typed_ctxt)){
-            return;
-        }
-    }
-
-    size_t num_queries = query_buffer->count_queries();
-    for (size_t start_idx = 0; start_idx < num_queries; start_idx += parent->max_batch_size) {
-        size_t cur_batch_size = std::min(static_cast<size_t>(parent->max_batch_size), num_queries - start_idx);
-        // 1. perform batched ANN search
-        long* I = new long[parent->top_k * cur_batch_size];
-        float* D = new float[parent->top_k * cur_batch_size];
-        parent->cluster_search_index->search(cur_batch_size, query_buffer->query_embs + start_idx * parent->emb_dim, parent->top_k, D, I);
-        if (!I || !D) {
-            dbg_default_error("Failed to batch search for cluster: {}", parent->cluster_id);
-            delete[] I;
-            delete[] D;
-            return;
+            space_left = pending_batches[free_batch]->space_left();
         }
 
-        // 2. Generate emit keys for this batch
-        std::vector<std::string> new_keys;
-        construct_new_keys(new_keys,
-            query_buffer->query_keys.begin() + start_idx,
-            query_buffer->query_keys.begin() + start_idx + cur_batch_size,
-            query_buffer->query_list.begin() + start_idx,
-            query_buffer->query_list.begin() + start_idx + cur_batch_size
-        );
-        // 3. Emit results 
-        emit_results(typed_ctxt, new_keys, query_buffer->query_list, I, D, start_idx, cur_batch_size);
+        if(space_left == 0){ // could not find a buffer with space, we need to create a new one
+            PendingEmbeddingQueryBatch *pending_batch = new PendingEmbeddingQueryBatch(parent->emb_dim,parent->max_process_batch_size);
+            pending_batches.emplace_back(pending_batch);
+            free_batch = pending_batches.size()-1;
+            space_left = pending_batches[free_batch]->space_left();
+        }
 
-        delete[] I;
-        delete[] D;
+        // add as many queries as possible
+        next_batch = free_batch;
+        uint64_t query_start_index = queries_added;
+        uint64_t num_to_add = std::min(space_left,num_queries-queries_added);
+        uint32_t embeddings_position = batch_manager->get_embeddings_position(query_start_index);
+        uint32_t embeddings_size = batch_manager->get_embeddings_size(num_to_add);
+        
+        pending_batches[next_batch]->add_queries(queries,query_start_index,num_to_add,buffer,embeddings_position,embeddings_size);
+        queries_added += num_to_add;
+
+        // if we complete filled the buffer, cycle to the next
+        if(pending_batches[next_batch]->space_left() == 0){
+            next_batch = (next_batch + 1) % pending_batches.size();
+            if(next_batch == current_batch){ // skip the batch being currently processed
+                next_batch = (next_batch + 1) % pending_batches.size();
+            }
+        }
     }
-}
-
-
-
-// check number of pending queries
-bool ClustersSearchOCDPO::ClusterSearchWorker::enough_pending_queries(int num){
-    if (use_shadow_flag == 1 && shadow_query_buffer->count_queries() >= num) {
-        return true;
-    } else if (use_shadow_flag == 0 && query_buffer->count_queries() >= num) {
-        return true;
-    }
-    return false;
+        
+    query_buffer_cv.notify_one();
 }
 
 void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextType* typed_ctxt) {
     auto batch_time = std::chrono::microseconds(parent->batch_time_us);
+    std::shared_ptr<PendingEmbeddingQueryBatch> batch;
     while (running) {
-        std::unique_lock<std::mutex> query_buff_lock(query_buffer_mutex); 
-        // check if there are queries to be processed on the current processing buffer
-        query_buffer_cv.wait_for(query_buff_lock, std::chrono::microseconds(parent->batch_time_us),[this]() {
-            return this->enough_pending_queries(parent->min_batch_size); ; 
-        });
-        if (!running) break;
-        if ( !this->enough_pending_queries(1)) {
-            continue;
+        batch.reset(); // clear the pointer
+
+        std::unique_lock<std::mutex> lock(query_buffer_mutex);
+        
+        current_batch = -1;
+        if(pending_batches[next_to_process]->empty()){
+            query_buffer_cv.wait_for(lock,batch_time);
         }
 
-        // TODO: if push_queries happens too frequent, add priority to the main_loop to process the queries
-        use_shadow_flag ^= 1; // flip the shadow flag, so the push_thread can start a new buffer
-        query_buff_lock.unlock();
+        if(!pending_batches[next_to_process]->empty()){
+            current_batch = next_to_process;
+            next_to_process = (next_to_process + 1) % pending_batches.size();
+            batch = pending_batches[current_batch];
+        }
+
+        lock.unlock();
         
         if (!running) break;
 
-        queryQueue* cur_query_buffer = nullptr;
-        if (use_shadow_flag == 1) {
-            cur_query_buffer = query_buffer.get();
-        } else {
-            cur_query_buffer = shadow_query_buffer.get();
+        if(current_batch < 0){
+            continue;
         }
-        run_cluster_search_and_emit(typed_ctxt, cur_query_buffer);
-    
-        cur_query_buffer->reset();
+
+        //  process batch
+        std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> results = process_batch(batch);
+
+        // push result to the batching thread
+        parent->batch_thread->push_results(std::move(results));
+
+        // clear batch so it can receive queries again
+        batch->reset();
     }
 }
 
-void ClustersSearchOCDPO::ClusterSearchWorker::push_to_query_buffer(int cluster_id, 
-                                                                    const Blob& blob, 
-                                                                    const std::string& key) {
-    // 1. get the query embeddings from the object
-    float* data;
-    uint32_t nq;
-    std::vector<std::string> query_list;
-    try{
-        deserialize_embeddings_and_quries_from_bytes(blob.bytes, blob.size, nq, parent->emb_dim, data, query_list);
-    } catch (const std::exception& e) {
-        std::cerr << "Error: failed to deserialize the query embeddings and query texts from the object." << std::endl;
-        dbg_default_error("{}, Failed to deserialize the query embeddings and query texts from the object.", __func__);
-        return;
+std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> ClustersSearchOCDPO::ClusterSearchWorker::process_batch(std::shared_ptr<PendingEmbeddingQueryBatch> batch){
+    const float * embeddings = batch->get_embeddings();
+    const std::vector<std::shared_ptr<EmbeddingQuery>>& queries = batch->get_queries();
+    uint64_t num_queries = batch->size();
+
+    // search
+    long* I = new long[parent->top_k * num_queries];
+    float* D = new float[parent->top_k * num_queries];
+    parent->cluster_search_index->search(num_queries, embeddings, parent->top_k, D, I);
+    
+    if (!I || !D) {
+        dbg_default_error("Failed to batch search for cluster: {}", parent->cluster_id);
+        delete[] I;
+        delete[] D;
+        return nullptr;
     }
-    // 2. add the queries to the queueing batch
-    std::unique_lock<std::mutex> lock(query_buffer_mutex);
-    // this step incurs a copy of the query embedding float[], to make it aligned with the other embeddings in the buffer for batching
-    if (use_shadow_flag == 1) {
-        shadow_query_buffer->add_queries(std::move(query_list), key, data, parent->emb_dim, nq);
-    } else {
-        query_buffer->add_queries(std::move(query_list), key, data, parent->emb_dim, nq);
+
+    // create result vector
+    std::shared_ptr<long> ids(I);
+    std::shared_ptr<float> dist(D);
+    std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> results = std::make_unique<std::vector<std::shared_ptr<ClusterSearchResult>>>();
+    for(uint64_t i=0;i<num_queries;i++){
+        ClusterSearchResult *res = new ClusterSearchResult(queries[i],ids,dist,i,parent->top_k);
+        results->emplace_back(res);
     }
-    query_buffer_cv.notify_one();
+
+    return results;
 }
 
 void ClustersSearchOCDPO::ClusterSearchWorker::start(DefaultCascadeContextType* typed_ctxt) {
@@ -200,14 +158,114 @@ void ClustersSearchOCDPO::ClusterSearchWorker::signal_stop() {
     query_buffer_cv.notify_all();
 }
 
+// BatchingThread
+
+ClustersSearchOCDPO::BatchingThread::BatchingThread(uint64_t thread_id, ClustersSearchOCDPO* parent_udl)
+    : my_thread_id(thread_id), parent(parent_udl), running(false) {}
+
+
+void ClustersSearchOCDPO::BatchingThread::start(DefaultCascadeContextType* typed_ctxt) {
+    running = true;
+    real_thread = std::thread(&BatchingThread::main_loop, this, typed_ctxt);
+}
+
+void ClustersSearchOCDPO::BatchingThread::join() {
+    if (real_thread.joinable()) {
+        real_thread.join();
+    }
+}
+
+void ClustersSearchOCDPO::BatchingThread::signal_stop() {
+    std::lock_guard<std::mutex> lock(shard_queue_mutex);
+    running = false;
+    shard_queue_cv.notify_all();
+}
+
+void ClustersSearchOCDPO::BatchingThread::push_results(std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> results){
+    uint32_t num_shards = capi.get_number_of_shards<VolatileCascadeStoreWithStringKey>(AGGREGATE_SUBGROUP_INDEX);
+    std::unique_lock<std::mutex> lock(shard_queue_mutex);
+
+    for(auto& result : *results){
+        uint32_t shard = result->get_query_id() % num_shards;
+        if(shard_queue.count(shard) == 0){
+            shard_queue[shard] = std::make_unique<std::vector<std::shared_ptr<ClusterSearchResult>>>();
+            shard_queue[shard]->reserve(parent->max_batch_size);
+        }
+
+        shard_queue[shard]->push_back(result);
+    }
+
+    shard_queue_cv.notify_all();
+}
+
+void ClustersSearchOCDPO::BatchingThread::main_loop(DefaultCascadeContextType* typed_ctxt) {
+    // TODO timestamp logging in this method should be revisited
+
+    std::unique_lock<std::mutex> lock(shard_queue_mutex, std::defer_lock);
+    std::unordered_map<uint32_t,std::chrono::steady_clock::time_point> wait_time;
+    auto batch_time = std::chrono::microseconds(parent->batch_time_us);
+    while (running) {
+        lock.lock();
+        bool empty = true;
+        for(auto& item : shard_queue){
+            if(!(item.second->empty())){
+                empty = false;
+                break;
+            }
+        }
+
+        if(empty){
+            shard_queue_cv.wait_for(lock,batch_time);
+        }
+
+        if (!running) break;
+
+        // move queue pointers out of the map and replace with empty vectors
+        std::unordered_map<uint32_t,std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>>> to_send;
+        auto now = std::chrono::steady_clock::now();
+        for(auto& item : shard_queue){
+            if(wait_time.count(item.first) == 0){
+                wait_time[item.first] = now;
+            }
+
+            if((item.second->size() >= parent->min_batch_size) || ((now-wait_time[item.first]) >= batch_time)){
+                to_send[item.first] = std::move(item.second);
+                item.second = std::make_unique<std::vector<std::shared_ptr<ClusterSearchResult>>>();
+                item.second->reserve(parent->max_batch_size);
+            }
+        }
+
+        lock.unlock();
+
+        // serialize and send batches
+        for(auto& item : to_send){
+            uint64_t num_sent = 0;
+            uint64_t total = item.second->size();
+
+            // send in batches of maximum max_batch_size queries
+            while(num_sent < total){
+                uint64_t left = total - num_sent;
+                uint64_t batch_size = std::min(static_cast<uint64_t>(parent->max_batch_size),left);
+
+                ClusterSearchResultBatcher batcher(parent->top_k,batch_size);
+                for(uint64_t i=num_sent;i<(num_sent+batch_size);i++){
+                    batcher.add_result(item.second->at(i));
+                }
+                batcher.serialize();
+
+                ObjectWithStringKey obj;
+                obj.key = EMIT_AGGREGATE_PREFIX "/results_qid" + std::to_string(item.first);
+                obj.blob = std::move(*batcher.get_blob());
+
+                typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, AGGREGATE_SUBGROUP_INDEX, item.first, true);
+
+                num_sent += batch_size;
+            }
+        }
+    }
+}
 
 bool ClustersSearchOCDPO::check_and_retrieve_cluster_index(DefaultCascadeContextType* typed_ctxt){
-    // Acquire a unique lock to modify the cluster search index
-    std::unique_lock<std::shared_mutex> write_lock(cluster_search_index_mutex);
-    // Double-check if the cluster was inserted by another thread
-    if (cluster_search_index->initialized_index.load()) {
-        return true;
-    } 
     TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_LOADEMB_START, my_id, this->cluster_id, 0);
     std::string cluster_prefix = CLUSTER_EMB_OBJECTPOOL_PREFIX + std::to_string(this->cluster_id);
     int filled_cluster_embs = cluster_search_index->retrieve_grouped_embeddings(cluster_prefix, typed_ctxt);
@@ -236,27 +294,36 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
                                uint32_t worker_id) {
     // TODO timestamp logging need to be revisited
 
-    /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusteres_search instead of /rag/emb, i.e. the objp name***/
+    /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/clusters_search instead of /rag/emb, i.e. the objp name***/
     dbg_default_trace("[Clusters search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
     
     // 0. parse the key, get the cluster ID
     uint64_t parsed_cluster_id = parse_cluster_id(key_string);
 
-    // TODO do we need to enforce the cluster ID here ? it could work for any cluster
+    // 1. check if we have the cluster index
     if (this->cluster_id == -1) {
         this->cluster_id = parsed_cluster_id;
+
+        // Check if the cluster search index is initialized
+        if (!cluster_search_index->initialized_index.load()){
+            if(!check_and_retrieve_cluster_index(typed_ctxt)){
+                this->cluster_id = -1;
+                return;
+            }
+        }
     } else if (this->cluster_id != parsed_cluster_id) {
         std::cerr << "Error: cluster ID mismatched" << std::endl;
         dbg_default_error("Cluster ID mismatched, at clusters_search_udl.");
         return;
     }
 
-    TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,0,parsed_cluster_id);
-    
+    //TimestampLogger::log(LOG_CLUSTER_SEARCH_UDL_START,my_id,0,parsed_cluster_id); // TODO revise
+   
+    // 3. batch manager 
     std::unique_ptr<EmbeddingQueryBatchManager> batch_manager = std::make_unique<EmbeddingQueryBatchManager>(object.blob.bytes,object.blob.size,emb_dim,false);
     
-    // 1. Add queries to the to the appropriate queue in the next thread
-    this->cluster_search_threads[next_thread]->push_to_query_buffer(parsed_cluster_id, std::move(batch_manager));
+    // 4. add queries to the to the appropriate queue in the next thread
+    this->cluster_search_threads[next_thread]->push_queries(parsed_cluster_id, std::move(batch_manager),object.blob.bytes);
     next_thread = (next_thread + 1) % this->num_threads; // cycle
     
     dbg_default_trace("[Cluster search ocdpo]: PUT {} to active queue on thread {}.", key_string, next_thread);
@@ -264,6 +331,9 @@ void ClustersSearchOCDPO::ocdpo_handler(const node_id_t sender,
 
 
 void ClustersSearchOCDPO::start_threads(DefaultCascadeContextType* typed_ctxt) {
+    this->batch_thread = std::make_unique<BatchingThread>(this->my_id, this);
+    this->batch_thread->start(typed_ctxt);
+
     for (int thread_id = 0; thread_id < this->num_threads; thread_id++) {
         cluster_search_threads.emplace_back(std::make_unique<ClusterSearchWorker>(static_cast<uint64_t>(thread_id), this));
     }
@@ -271,7 +341,6 @@ void ClustersSearchOCDPO::start_threads(DefaultCascadeContextType* typed_ctxt) {
         cluster_search_thread->start(typed_ctxt);
     }
 }
-
 
 void ClustersSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, const nlohmann::json& config){
     this->my_id = typed_ctxt->get_service_client_ref().get_my_id();
@@ -294,14 +363,8 @@ void ClustersSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, cons
         if (config.contains("max_batch_size")) {
             this->max_batch_size = config["max_batch_size"].get<uint32_t>();
         }
-        if (config.contains("min_process_batch_size")) {
-            this->min_process_batch_size = config["min_process_batch_size"].get<uint32_t>();
-        }
         if (config.contains("max_process_batch_size")) {
             this->max_process_batch_size = config["max_process_batch_size"].get<uint32_t>();
-        }
-        if (config.contains("process_batch_time_us")) {
-            this->process_batch_time_us = config["process_batch_time_us"].get<uint32_t>();
         }
         // Currenlty only support multithreading for hnswlib search, as GPU flat search requires cuda streams for host side parallelism
         if (config.contains("num_threads") && static_cast<GroupedEmbeddingsForSearch::SearchType>(this->faiss_search_type) == GroupedEmbeddingsForSearch::SearchType::HnswlibCpuSearch) {
@@ -316,7 +379,6 @@ void ClustersSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, cons
 }
 
 void ClustersSearchOCDPO::shutdown() {
-    std::unique_lock<std::shared_mutex> lock(cluster_search_index_mutex);
     // Clean up index resources
     cluster_search_index->reset();  
     for (auto& cluster_search_thread : cluster_search_threads) {
@@ -325,10 +387,12 @@ void ClustersSearchOCDPO::shutdown() {
             cluster_search_thread->join();
         }
     }
+
+    if (batch_thread) {
+        batch_thread->signal_stop();
+        batch_thread->join();
+    }
 }
-
-
-
 
 } // namespace cascade
 } // namespace derecho
