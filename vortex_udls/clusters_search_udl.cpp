@@ -92,6 +92,11 @@ void ClustersSearchOCDPO::ClusterSearchWorker::main_loop(DefaultCascadeContextTy
             current_batch = next_to_process;
             next_to_process = (next_to_process + 1) % pending_batches.size();
             batch = pending_batches[current_batch];
+
+            // if we are gonna process now the same batch that is being filled by the main thread, we need to set the next batch to start being filled
+            if(current_batch == next_batch){
+                next_batch = (next_batch + 1) % pending_batches.size();
+            }
         }
 
         lock.unlock();

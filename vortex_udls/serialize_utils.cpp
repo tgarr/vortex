@@ -227,7 +227,6 @@ EmbeddingQueryBatchManager::EmbeddingQueryBatchManager(const uint8_t *buffer,uin
     
     this->header_size = sizeof(uint32_t) * 2;
     this->metadata_size = sizeof(uint32_t) * 5 + sizeof(query_id_t);
-    this->text_position = this->header_size + (this->metadata_size * this->num_queries);
     this->embeddings_size = buffer_size - this->embeddings_position;
    
     if(copy_embeddings){
@@ -270,6 +269,218 @@ void EmbeddingQueryBatchManager::create_queries(){
         uint32_t metadata_position = header_size + (i * metadata_size);
         query_id_t query_id = *reinterpret_cast<query_id_t*>(buffer.get()+metadata_position);
         queries.emplace_back(new EmbeddingQuery(buffer,buffer_size,query_id,metadata_position));
+    }
+}
+
+/*
+ * ClusterSearchResult implementation
+ */
+
+ClusterSearchResult::ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,std::shared_ptr<long> ids,std::shared_ptr<float> dist,uint64_t idx,uint32_t top_k){
+    // from query
+    query_id = query->query_id;
+    client_id = query->node_id;
+    text_position = query->text_position;
+    text_size = query->text_size;
+    buffer = query->buffer;
+
+    this->ids = ids;
+    this->dist = dist;
+    this->top_k = top_k;
+
+    ids_size = top_k * sizeof(long);
+    ids_position = idx;
+        
+    dist_size = top_k * sizeof(float);
+    dist_position = idx;
+    
+    from_buffer = false;
+}
+
+ClusterSearchResult::ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t metadata_position,uint32_t top_k){
+    this->buffer = buffer;
+    this->query_id = query_id;
+    this->top_k = top_k;
+
+    // get metadata: client_id,text_position,text_size,ids_position,ids_size,dist_position,dist_size
+    const uint32_t *metadata = reinterpret_cast<uint32_t*>(buffer.get()+metadata_position+sizeof(query_id_t));
+    client_id = metadata[0];
+    text_position = metadata[1];
+    text_size = metadata[2];
+    ids_position = metadata[3];
+    ids_size = metadata[4];
+    dist_position = metadata[5];
+    dist_size = metadata[6];
+    
+    from_buffer = true;
+}
+
+std::shared_ptr<std::string> ClusterSearchResult::get_text(){
+    if(!text){
+        text = mutils::from_bytes<std::string>(nullptr,buffer.get()+text_position);
+    }
+
+    return text;
+}
+
+const long * ClusterSearchResult::get_ids_pointer(){
+    if(from_buffer){
+        return reinterpret_cast<long*>(buffer.get()+ids_position);
+    }
+
+    return ids.get() + ids_position;
+}
+
+const float * ClusterSearchResult::get_distances_pointer(){
+    if(from_buffer){
+        return reinterpret_cast<float*>(buffer.get()+dist_position);
+    }
+
+    return dist.get() + dist_position;
+}
+
+const uint8_t * ClusterSearchResult::get_text_pointer(){
+    return buffer.get()+text_position;
+}
+
+uint32_t ClusterSearchResult::get_text_size(){
+    return text_size;
+}
+
+query_id_t ClusterSearchResult::get_query_id(){
+    return query_id;
+}
+
+uint32_t ClusterSearchResult::get_client_id(){
+    return client_id;
+}
+
+/*
+ * ClusterSearchResultBatcher implementation
+ */
+
+ClusterSearchResultBatcher::ClusterSearchResultBatcher(uint32_t top_k,uint64_t size_hint){
+    this->top_k = top_k;
+
+    results.reserve(size_hint);
+
+    metadata_size = sizeof(uint32_t) * 7 + sizeof(query_id_t);
+    header_size = sizeof(uint32_t) * 2;
+    ids_size = top_k * sizeof(long);
+    dist_size = top_k * sizeof(float);
+}
+
+void ClusterSearchResultBatcher::add_result(std::shared_ptr<ClusterSearchResult> result){
+    results.push_back(result);
+}
+
+// format: num_results,top_k | {query_id,client_id,text_position,text_size,ids_position,ids_size,dist_position,dist_size} | {query_text} | {ids_array} | {distances_array}
+void ClusterSearchResultBatcher::serialize(){
+    num_results = results.size();
+    total_text_size = 0;
+    uint32_t total_size = header_size; // header: num_results,top_k
+
+    // compute the number of bytes each result will take in the buffer
+    for(auto& res : results){
+        query_id_t query_id = res->get_query_id();
+        uint32_t query_text_size = res->get_text_size();
+        total_size += query_text_size + metadata_size + ids_size + dist_size;
+        total_text_size += query_text_size;
+        text_size[query_id] = query_text_size;
+    }
+
+    // use a lambda to build buffer, to avoid a copy
+    blob = std::make_shared<derecho::cascade::Blob>([&](uint8_t* buffer,const std::size_t size){
+            uint32_t metadata_position = header_size; // position to start writing metadata
+            uint32_t text_position = metadata_position + (num_results * metadata_size); // position to start writing the query texts
+            uint32_t ids_position = text_position + total_text_size; // position to start writing the IDs
+            uint32_t dist_position = ids_position + (num_results * ids_size); // position to start writing the distances
+            
+            // write header
+            uint32_t header[2] = {num_results,top_k};
+            std::memcpy(buffer,header,header_size);
+            
+            // write each result to the buffer
+            for(auto& res : results){
+                query_id_t query_id = res->get_query_id();
+                uint32_t node_id = res->get_client_id();
+                const long * res_ids = res->get_ids_pointer();
+                const float * res_dist = res->get_distances_pointer();
+                const uint8_t * text_data = res->get_text_pointer();
+                uint32_t res_text_size = text_size[query_id];
+
+                // write metadata: query_id, node_id, text_position, res_text_size, ids_position, ids_size, dist_position, dist_size
+                uint32_t metadata_array[7] = {node_id,text_position,res_text_size,ids_position,ids_size,dist_position,dist_size};
+                std::memcpy(buffer+metadata_position,&query_id,sizeof(query_id_t));
+                std::memcpy(buffer+metadata_position+sizeof(query_id_t),metadata_array,metadata_size-sizeof(query_id_t));
+
+                // write ids
+                std::memcpy(buffer+ids_position,res_ids,ids_size);
+                
+                // write dist
+                std::memcpy(buffer+dist_position,res_dist,dist_size);
+                
+                // write text
+                std::memcpy(buffer+text_position,text_data,res_text_size);
+               
+                // update position for the next 
+                metadata_position += metadata_size;
+                text_position += res_text_size;
+                ids_position += ids_size;
+                dist_position += dist_size;
+            }
+
+            return size;
+        },total_size);
+}
+
+std::shared_ptr<derecho::cascade::Blob> ClusterSearchResultBatcher::get_blob(){
+    return blob;
+}
+
+void ClusterSearchResultBatcher::reset(){
+    blob.reset();
+    results.clear();
+    text_size.clear();
+}
+
+/*
+ * ClusterSearchResultBatchManager implementation
+ */
+
+ClusterSearchResultBatchManager::ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size){
+    const uint32_t *header = reinterpret_cast<const uint32_t *>(buffer);
+    this->num_results = header[0];
+    this->top_k = header[1];
+    
+    this->header_size = sizeof(uint32_t) * 2;
+    this->metadata_size = sizeof(uint32_t) * 7 + sizeof(query_id_t);
+    this->buffer_size = buffer_size;
+
+    std::shared_ptr<uint8_t> copy(new uint8_t[this->buffer_size]);
+    std::memcpy(copy.get(),buffer,this->buffer_size);
+    this->buffer = std::move(copy);
+}
+
+const std::vector<std::shared_ptr<ClusterSearchResult>>& ClusterSearchResultBatchManager::get_results(){
+    if(results.empty()){
+        create_results();
+    }
+
+    return results;
+}
+
+uint64_t ClusterSearchResultBatchManager::count(){
+    return num_results;
+}
+
+void ClusterSearchResultBatchManager::create_results(){
+    results.reserve(num_results);
+
+    for(uint32_t i=0;i<num_results;i++){
+        uint32_t metadata_position = header_size + (i * metadata_size);
+        query_id_t query_id = *reinterpret_cast<query_id_t*>(buffer.get()+metadata_position);
+        results.emplace_back(new ClusterSearchResult(buffer,query_id,metadata_position,top_k));
     }
 }
 

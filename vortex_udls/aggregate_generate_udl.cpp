@@ -314,6 +314,9 @@ bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id,
     return true;
 }
 
+// XXX just for testing
+std::unordered_map<uint64_t,uint64_t> QUERY_COUNT;
+uint64_t COMPLETED_COUNT = 0;
 
 void AggGenOCDPO::ocdpo_handler(const node_id_t sender, 
                                 const std::string& object_pool_pathname, 
@@ -322,6 +325,21 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
                                 const emit_func_t& emit, 
                                 DefaultCascadeContextType* typed_ctxt, 
                                 uint32_t worker_id) {
+
+
+    std::unique_ptr<ClusterSearchResultBatchManager> batch_manager = std::make_unique<ClusterSearchResultBatchManager>(object.blob.bytes,object.blob.size);
+
+    for(auto& res : batch_manager->get_results()){
+        QUERY_COUNT[res->get_query_id()]++;
+        if(QUERY_COUNT[res->get_query_id()] == top_num_centroids){
+            COMPLETED_COUNT++;
+        }
+    }
+
+    std::cout << "COMPLETED: " << COMPLETED_COUNT << std::endl;
+
+    return;
+
     // 1. parse the query information from the key_string
     std::unique_ptr<queuedTask> task_ptr = std::make_unique<queuedTask>();
     if (!parse_query_info(key_string, task_ptr->client_id, task_ptr->batch_id, task_ptr->cluster_id, task_ptr->qid)) {
@@ -376,7 +394,6 @@ void AggGenOCDPO::shutdown() {
     process_thread->signal_stop();
     process_thread->join();
 }
-
 
 }  // namespace cascade
 }  // namespace derecho

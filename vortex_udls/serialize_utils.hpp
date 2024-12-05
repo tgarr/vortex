@@ -30,6 +30,8 @@ public:
     uint32_t get_text_size();
     uint64_t get_id();
     uint32_t get_node();
+
+    friend class ClusterSearchResult;
 };
 
 /* 
@@ -45,7 +47,6 @@ class EmbeddingQueryBatchManager {
     uint64_t emb_dim;
     uint32_t num_queries;
     uint32_t embeddings_position;
-    uint32_t text_position; // TODO may not be necessary
     bool copy_embeddings = true;
 
     uint32_t header_size;
@@ -106,7 +107,7 @@ public:
  * This encapsulates the results of the cluster search.
  * 
  */
-class ClusterSearchResult { // TODO
+class ClusterSearchResult {
     std::shared_ptr<long> ids;
     std::shared_ptr<float> dist;
     std::shared_ptr<uint8_t> buffer;
@@ -134,7 +135,7 @@ public:
  * This class gathers and serializes cluster search results to be sent to UDL3.
  *
  */
-class ClusterSearchResultBatcher { // TODO
+class ClusterSearchResultBatcher {
     uint32_t top_k;
     uint32_t metadata_size;
     uint32_t header_size;
@@ -150,13 +151,37 @@ class ClusterSearchResultBatcher { // TODO
 public:
     ClusterSearchResultBatcher(uint32_t top_k,uint64_t size_hint = 1000);
 
-    void add_result(std::shared_ptr<ClusterSearchResult> query);
+    void add_result(std::shared_ptr<ClusterSearchResult> result);
 
     std::shared_ptr<derecho::cascade::Blob> get_blob();
 
     void serialize();
     void reset();
 };
+
+/* 
+ * This class manages a batch of cluster search results received from UDL2.
+ *
+ */
+
+class ClusterSearchResultBatchManager {
+    std::shared_ptr<uint8_t> buffer;
+    uint64_t buffer_size;
+    uint32_t num_results;
+    uint32_t top_k;
+    uint32_t header_size;
+    uint32_t metadata_size;
+
+    std::vector<std::shared_ptr<ClusterSearchResult>> results;
+    
+    void create_results();
+
+public:
+    ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size);
+    const std::vector<std::shared_ptr<ClusterSearchResult>>& get_results();
+    uint64_t count();
+};
+
 
 /*
  * Helper functions
