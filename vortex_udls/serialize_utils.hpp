@@ -126,6 +126,7 @@ public:
     uint32_t get_client_id();
     std::shared_ptr<std::string> get_text();
     const long * get_ids_pointer();
+    uint32_t get_top_k();
     const float * get_distances_pointer();
     const uint8_t * get_text_pointer();
     uint32_t get_text_size();
@@ -180,6 +181,85 @@ public:
     ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size);
     const std::vector<std::shared_ptr<ClusterSearchResult>>& get_results();
     uint64_t count();
+};
+
+class ClusterSearchResultsAggregate; // cross-reference
+
+/*
+ * Class for comparing document IDs based on their distance while adding elements to the priority queue
+ */
+class DocIDComparison {
+    ClusterSearchResultsAggregate* aggregate;
+public:
+    DocIDComparison(ClusterSearchResultsAggregate* aggregate);
+    DocIDComparison(const DocIDComparison &other);
+    bool operator() (const long& l, const long& r) const;
+};
+
+/*
+ * This is just a priority queue with an added method to access the underlying vector.
+ * This way we can directly copy the top_k document IDs without removing one by one from the priority queue (we don't care about the order, just that we have the top k)
+ *
+ */
+class AggregatePriorityQueue : public std::priority_queue<long,std::vector<long>,DocIDComparison> {
+public:
+    AggregatePriorityQueue(DocIDComparison &comp): std::priority_queue<long,std::vector<long>,DocIDComparison>(comp) {}
+
+    /*
+     * This is a bit hacky but does the job. 
+     * Alternatively, we can just use a plain vector an manage it ourselves with std::push_heap and pop_heap
+     */
+    const std::vector<long>& get_vector() { return this->c; } 
+};
+
+class ClusterSearchResultsAggregate {
+    uint32_t total_num_results;
+    uint32_t received_results = 0;
+    uint32_t top_k;
+    std::shared_ptr<ClusterSearchResult> first_result; // so we can get data like query_text without copying
+    std::unique_ptr<AggregatePriorityQueue> agg_top_k_results;
+    std::unordered_map<long,float> distance;
+
+public:
+    ClusterSearchResultsAggregate(std::shared_ptr<ClusterSearchResult> result,uint32_t total_num_results, uint32_t top_k);
+
+    void add_result(std::shared_ptr<ClusterSearchResult> result);
+    bool all_results_received();
+
+    query_id_t get_query_id();
+    uint32_t get_client_id();
+    const uint8_t * get_text_pointer();
+    uint32_t get_text_size();
+    std::shared_ptr<std::string> get_text();
+    const std::vector<long>& get_ids();
+    float get_distance(long id);
+};
+
+/*
+ * This class gathers and serializes final results to send to the client.
+ *
+ */
+class ClientNotificationBatcher {
+    uint32_t top_k;
+    uint32_t header_size;
+    uint32_t query_ids_size;
+    uint32_t doc_ids_size;
+    uint32_t dist_size;
+    uint32_t num_aggregates = 0;
+    bool include_distances = false;
+
+    std::vector<std::unique_ptr<ClusterSearchResultsAggregate>> aggregates;
+    std::shared_ptr<derecho::cascade::Blob> blob;
+
+public:
+    ClientNotificationBatcher(uint32_t top_k,uint64_t size_hint = 1000,bool include_distances=false);
+
+    void add_aggregate(std::unique_ptr<ClusterSearchResultsAggregate> aggregate);
+
+    std::shared_ptr<derecho::cascade::Blob> get_blob();
+
+    void serialize();
+    void reset();
 };
 
 

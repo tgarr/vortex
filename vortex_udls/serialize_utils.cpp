@@ -315,6 +315,10 @@ ClusterSearchResult::ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_
     from_buffer = true;
 }
 
+uint32_t ClusterSearchResult::get_top_k(){
+    return top_k;
+}
+
 std::shared_ptr<std::string> ClusterSearchResult::get_text(){
     if(!text){
         text = mutils::from_bytes<std::string>(nullptr,buffer.get()+text_position);
@@ -483,6 +487,166 @@ void ClusterSearchResultBatchManager::create_results(){
         results.emplace_back(new ClusterSearchResult(buffer,query_id,metadata_position,top_k));
     }
 }
+
+/*
+ * ClusterSearchResultsAggregate implementation
+ *
+ */
+
+DocIDComparison::DocIDComparison(ClusterSearchResultsAggregate* aggregate): aggregate(aggregate) {}
+
+DocIDComparison::DocIDComparison(const DocIDComparison &other): aggregate(other.aggregate) {}
+
+bool DocIDComparison::operator() (const long& l, const long& r) const {
+    return aggregate->get_distance(l) < aggregate->get_distance(r);
+}
+
+ClusterSearchResultsAggregate::ClusterSearchResultsAggregate(std::shared_ptr<ClusterSearchResult> result,uint32_t total_num_results, uint32_t top_k) {
+    this->total_num_results = total_num_results;
+    this->received_results = 0;
+    this->top_k = top_k;
+    this->first_result = result;
+
+    DocIDComparison comp(this);
+    this->agg_top_k_results = std::make_unique<AggregatePriorityQueue>(comp);
+
+    add_result(result);
+}
+
+bool ClusterSearchResultsAggregate::all_results_received(){
+    return received_results >= total_num_results;
+}
+
+void ClusterSearchResultsAggregate::add_result(std::shared_ptr<ClusterSearchResult> result){
+    // TODO should we check if this result has already been received? may be important in the future when/if we have fault tolerance
+
+    // add the doc IDs to the max heap, and keep the size of the heap to be top_k
+    const long * ids = result->get_ids_pointer();
+    const float * dist = result->get_distances_pointer();
+    for(uint32_t i=0; i<result->get_top_k(); i++){
+        long doc_id = ids[i];
+        long top_id = agg_top_k_results->top();
+        distance[doc_id] = dist[i];
+
+        if (agg_top_k_results->size() < top_k) {
+            agg_top_k_results->push(doc_id);
+        } else if (distance[doc_id] < distance[top_id]) {
+            agg_top_k_results->pop();
+            agg_top_k_results->push(doc_id);
+        }
+    }
+
+    received_results++;
+}
+
+
+query_id_t ClusterSearchResultsAggregate::get_query_id(){
+    return first_result->get_query_id();
+}
+
+uint32_t ClusterSearchResultsAggregate::get_client_id(){
+    return first_result->get_client_id();
+}
+
+const uint8_t * ClusterSearchResultsAggregate::get_text_pointer(){
+    return first_result->get_text_pointer();
+}
+
+uint32_t ClusterSearchResultsAggregate::get_text_size(){
+    return first_result->get_text_size();
+}
+
+std::shared_ptr<std::string> ClusterSearchResultsAggregate::get_text(){
+    return first_result->get_text();
+}
+
+const std::vector<long>& ClusterSearchResultsAggregate::get_ids(){
+    return agg_top_k_results->get_vector();
+}
+
+float ClusterSearchResultsAggregate::get_distance(long id){
+    return distance[id];
+}
+
+/*
+ * ClientNotificationBatcher implementation
+ */
+
+ClientNotificationBatcher::ClientNotificationBatcher(uint32_t top_k,uint64_t size_hint,bool include_distances){
+    this->top_k = top_k;
+    this->include_distances = include_distances;
+
+    aggregates.reserve(size_hint);
+
+    header_size = sizeof(uint32_t) * 2;
+    query_ids_size = sizeof(query_id_t);
+    doc_ids_size = top_k * sizeof(long);
+    dist_size = top_k * sizeof(float);
+}
+
+void ClientNotificationBatcher::add_aggregate(std::unique_ptr<ClusterSearchResultsAggregate> aggregate){
+    aggregates.push_back(std::move(aggregate));
+}
+
+// format: num_aggregates,top_k | {query_id} | {doc_ids} | {dist}
+void ClientNotificationBatcher::serialize(){
+    num_aggregates = aggregates.size();
+    uint32_t total_size = header_size + (query_ids_size * num_aggregates) + (doc_ids_size * num_aggregates); 
+    if(include_distances){
+        total_size += dist_size * num_aggregates;
+    }
+
+    // use a lambda to build buffer, to avoid a copy
+    blob = std::make_shared<derecho::cascade::Blob>([&](uint8_t* buffer,const std::size_t size){
+            uint32_t query_ids_position = header_size;
+            uint32_t doc_ids_position = query_ids_position + (query_ids_size * num_aggregates);
+            uint32_t dist_position = doc_ids_position + (num_aggregates * doc_ids_size);
+            
+            // write header
+            uint32_t header[2] = {num_aggregates,top_k};
+            std::memcpy(buffer,header,header_size);
+            
+            // write each result to the buffer
+            for(auto& agg : aggregates){
+                query_id_t query_id = agg->get_query_id();
+                const long * ids_data = agg->get_ids().data();
+
+                // write query_id
+                std::memcpy(buffer+query_ids_position,&query_id,query_ids_size);
+
+                // write doc ids
+                std::memcpy(buffer+doc_ids_position,ids_data,doc_ids_size);
+                
+                // write distances
+                if(include_distances){
+                    float *dist_buffer = reinterpret_cast<float*>(buffer+dist_position);
+                    for(uint32_t i=0;i<top_k;i++){
+                        float dist = agg->get_distance(ids_data[i]);
+                        dist_buffer[i] = dist;
+                    }
+                }
+
+                // update position for the next 
+                query_ids_position += query_ids_size;
+                doc_ids_position += doc_ids_size;
+                dist_position += dist_size;
+            }
+
+            return size;
+        },total_size);
+}
+
+std::shared_ptr<derecho::cascade::Blob> ClientNotificationBatcher::get_blob(){
+    return blob;
+}
+
+void ClientNotificationBatcher::reset(){
+    blob.reset();
+    aggregates.clear();
+}
+
+
+
 
 /*
  * Helper functions
