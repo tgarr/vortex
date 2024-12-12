@@ -525,14 +525,16 @@ void ClusterSearchResultsAggregate::add_result(std::shared_ptr<ClusterSearchResu
     const float * dist = result->get_distances_pointer();
     for(uint32_t i=0; i<result->get_top_k(); i++){
         long doc_id = ids[i];
-        long top_id = agg_top_k_results->top();
         distance[doc_id] = dist[i];
 
         if (agg_top_k_results->size() < top_k) {
             agg_top_k_results->push(doc_id);
-        } else if (distance[doc_id] < distance[top_id]) {
-            agg_top_k_results->pop();
-            agg_top_k_results->push(doc_id);
+        } else {
+            long top_id = agg_top_k_results->top();
+            if (distance[doc_id] < distance[top_id]) {
+                agg_top_k_results->pop();
+                agg_top_k_results->push(doc_id);
+            }
         }
     }
 
@@ -610,7 +612,7 @@ void ClientNotificationBatcher::serialize(){
             for(auto& agg : aggregates){
                 query_id_t query_id = agg->get_query_id();
                 const long * ids_data = agg->get_ids().data();
-
+            
                 // write query_id
                 std::memcpy(buffer+query_ids_position,&query_id,query_ids_size);
 
@@ -645,8 +647,84 @@ void ClientNotificationBatcher::reset(){
     aggregates.clear();
 }
 
+/*
+ * ClientNotificationManager implementation
+ */
 
+ClientNotificationManager::ClientNotificationManager(std::shared_ptr<uint8_t> buffer,uint64_t buffer_size){
+    this->buffer = buffer;
+    this->buffer_size = buffer_size;
 
+    const uint32_t *header = reinterpret_cast<const uint32_t *>(buffer.get());
+    this->num_results = header[0];
+    this->top_k = header[1];
+    
+    this->header_size = sizeof(uint32_t) * 2;
+    this->query_ids_size = sizeof(query_id_t);
+    this->doc_ids_size = top_k * sizeof(long);
+    this->dist_size = top_k * sizeof(float);
+}
+
+const std::vector<std::shared_ptr<VortexANNResult>>& ClientNotificationManager::get_results(){
+    if(results.empty()){
+        create_results();
+    }
+
+    return results;
+}
+
+uint64_t ClientNotificationManager::count(){
+    return num_results;
+}
+
+void ClientNotificationManager::create_results(){
+    results.reserve(num_results);
+
+    uint32_t ids_start = header_size + (num_results * query_ids_size);
+    uint32_t dist_start = ids_start + (num_results * doc_ids_size);
+
+    for(uint32_t i=0;i<num_results;i++){
+        // VortexANNResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t ids_position,uint32_t dist_position,uint32_t top_k);
+        uint32_t metadata_position = header_size + (i * query_ids_size);
+        query_id_t query_id = *reinterpret_cast<query_id_t*>(buffer.get()+metadata_position);
+        
+        uint32_t ids_position = ids_start + (i * doc_ids_size);
+        uint32_t dist_position = 0;
+        if(dist_start < buffer_size){
+            dist_position = dist_start + (i * dist_size);
+        }
+
+        results.emplace_back(new VortexANNResult(buffer,query_id,ids_position,dist_position,top_k));
+    }
+}
+
+/*
+ * VortexANNResult implementation
+ */
+
+VortexANNResult::VortexANNResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t ids_position,uint32_t dist_position,uint32_t top_k){
+    this->buffer = buffer;
+    this->query_id = query_id;
+    this->top_k = top_k;
+    this->ids_position = ids_position;
+    this->dist_position = dist_position;
+}
+
+uint32_t VortexANNResult::get_top_k(){
+    return top_k;
+}
+
+const long * VortexANNResult::get_ids_pointer(){
+    return reinterpret_cast<long*>(buffer.get()+ids_position);
+}
+
+const float * VortexANNResult::get_distances_pointer(){
+    return reinterpret_cast<float*>(buffer.get()+dist_position);
+}
+
+query_id_t VortexANNResult::get_query_id(){
+    return query_id;
+}
 
 /*
  * Helper functions

@@ -161,7 +161,7 @@ void AggGenOCDPO::BatchingThread::main_loop(DefaultCascadeContextType* typed_ctx
                 // notify client
                 try {
                     std::string notification_pathname = "/rag/results/" + std::to_string(item.first);
-                    typed_ctxt->get_service_client_ref().notify(*batcher.get_blob(),notification_pathname,item.first);
+                    typed_ctxt->get_service_client_ref().notify(*(batcher.get_blob()),notification_pathname,item.first);
                     dbg_default_trace("[AggregateGenUDL] echo back to node {}", item.first);
                 } catch (derecho::derecho_exception& ex) {
                     std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;

@@ -133,33 +133,16 @@ void VortexBenchmarkClient::dump_timestamps(bool dump_remote){
     }
 }
 
-void VortexBenchmarkClient::result_received(nlohmann::json &all_results_json){
-    for (const auto& result_json : all_results_json) {
-        if (result_json.count("query") == 0 || result_json.count("top_k_docs") == 0) {
-            std::cerr << "Result JSON does not contain query or top_k_docs." << std::endl;
-            continue;
-        }
-
-        uint64_t batch_id = (int)result_json["query_batch_id"] / QUERY_BATCH_ID_MODULUS; // TODO this is weird: we should use a global unique identifier for each individual query
-        std::string query_text(std::move(result_json["query"]));
-
-        std::shared_lock<std::shared_mutex> lock(client_thread->map_mutex);
-        auto index_and_id = client_thread->batched_query_to_index_and_id[batch_id][query_text];
-        lock.unlock();
-
-        uint64_t query_index = index_and_id.first;
-        query_id_t query_id = index_and_id.second;
-
-        std::unique_lock<std::shared_mutex> lock2(result_mutex);
-        result.emplace(query_id,std::move(result_json["top_k_docs"]));
-        lock2.unlock();
-        
-        TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,batch_id,query_index);
-        result_count++;
-    }
+void VortexBenchmarkClient::ann_result_received(std::shared_ptr<VortexANNResult> res){
+    query_id_t query_id = res->get_query_id();
+    std::unique_lock<std::shared_mutex> lock(result_mutex);
+    result.emplace(query_id,res);
+    result_count++;
+    
+    TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,query_id,0); // TODO revise
 }
 
-const std::vector<std::string>& VortexBenchmarkClient::get_result(query_id_t query_id){
+std::shared_ptr<VortexANNResult> VortexBenchmarkClient::get_result(query_id_t query_id){
     std::shared_lock<std::shared_mutex> lock(result_mutex);
     return result[query_id];
 }
@@ -259,8 +242,11 @@ VortexBenchmarkClient::NotificationThread::NotificationThread(VortexBenchmarkCli
 }
 
 void VortexBenchmarkClient::NotificationThread::push_result(const Blob& result){
+    std::shared_ptr<uint8_t> buffer(new uint8_t[result.size]);
+    std::memcpy(buffer.get(),result.bytes,result.size);
+
     std::unique_lock<std::mutex> lock(thread_mtx);
-    to_process.emplace(result);
+    to_process.emplace(buffer,result.size);
     thread_signal.notify_all();
 }
 
@@ -282,28 +268,18 @@ void VortexBenchmarkClient::NotificationThread::main_loop(){
 
         if(!running) break;
 
-        Blob blob(std::move(to_process.front()));
+        auto pending = to_process.front();
         to_process.pop();
         lock.unlock();
         
-        // deserialize the JSON
-        // TODO why JSON?
-       
-        if (blob.size == 0) {
+        if (pending.second == 0) {
              std::cerr << "Error: empty result blob." << std::endl;
              continue;
         }
 
-        char* json_data = const_cast<char*>(reinterpret_cast<const char*>(blob.bytes));
-        std::size_t json_size = blob.size;
-        std::string json_string(json_data, json_size);
-
-        try{
-             nlohmann::json parsed_json = nlohmann::json::parse(json_string);
-             vortex->result_received(parsed_json);
-        } catch (const nlohmann::json::parse_error& e) {
-             std::cerr << "Result JSON parse error: " << e.what() << std::endl;
-             continue;
+        ClientNotificationManager manager(pending.first,pending.second);
+        for(auto& ann_result : manager.get_results()){
+            vortex->ann_result_received(ann_result);
         }
     }
 }

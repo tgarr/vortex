@@ -27,10 +27,11 @@ void print_help(const std::string& bin_name){
     std::cout << " -h\t\t\t\tshow this help" << std::endl;
 }
 
-inline bool is_in_topk(const std::vector<std::string>& groundtruth, const std::string& target, int k) {
-     k = std::min(k, (int)groundtruth.size());
-     auto it = std::find(groundtruth.begin(), groundtruth.begin() + k, target);
-     return it != (groundtruth.begin() + k);
+inline bool is_in_topk(const std::vector<std::string>& groundtruth, long doc_id, int k) {
+    std::string target = std::to_string(doc_id);
+    k = std::min(k, (int)groundtruth.size());
+    auto it = std::find(groundtruth.begin(), groundtruth.begin() + k, target);
+    return it != (groundtruth.begin() + k);
 }
 
 int main(int argc, char** argv){
@@ -150,13 +151,13 @@ int main(int argc, char** argv){
             const auto& results = vortex.get_result(query_id);
             const auto& groundtruth = dataset.get_groundtruth(query_index);
 
-            uint64_t topk = results.size();
+            uint64_t topk = results->get_top_k();
             uint64_t found = 0;
-            for (const auto& result : results) {
-                 std::string doc_index = result.substr(result.find_last_of('/') + 1); // indices are written as string
-                 if (is_in_topk(groundtruth, doc_index, topk)) {
-                      found++;
-                 }
+            const long * doc_ids = results->get_ids_pointer();
+            for (uint64_t i=0; i<topk; i++) {
+                if (is_in_topk(groundtruth, doc_ids[i], topk)) {
+                    found++;
+                }
             }
             total_recall += static_cast<double>(found) / topk;
         }

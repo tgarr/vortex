@@ -57,10 +57,6 @@ class VortexBenchmarkClient {
         void signal_stop();
         std::unordered_map<uint64_t,uint64_t> batch_size;
 
-        // TODO this is inefficient: we should use a global identifier (query_id_t) for each query and send it through the pipeline, so it's easy to identify them later when the results come back
-        std::unordered_map<uint64_t,std::unordered_map<std::string,std::pair<uint64_t,query_id_t>>> batched_query_to_index_and_id;
-        std::shared_mutex map_mutex;
-
         inline void start(){
             running = true;
             real_thread = std::thread(&ClientThread::main_loop,this);
@@ -81,7 +77,7 @@ class VortexBenchmarkClient {
         std::mutex thread_mtx;
         std::condition_variable thread_signal;
 
-        std::queue<Blob> to_process;
+        std::queue<std::pair<std::shared_ptr<uint8_t>,uint64_t>> to_process;
         VortexBenchmarkClient* vortex;
 
         void main_loop();
@@ -115,8 +111,8 @@ class VortexBenchmarkClient {
 
     std::atomic<uint64_t> result_count = 0;
     std::shared_mutex result_mutex;
-    std::unordered_map<query_id_t,std::vector<std::string>> result;
-    void result_received(nlohmann::json &result_json);
+    std::unordered_map<query_id_t,std::shared_ptr<VortexANNResult>> result;
+    void ann_result_received(std::shared_ptr<VortexANNResult> result);
 
     public:
 
@@ -127,7 +123,7 @@ class VortexBenchmarkClient {
    
     uint64_t query(std::shared_ptr<std::string> query,std::shared_ptr<float> query_emb);
     void wait_results();
-    const std::vector<std::string>& get_result(query_id_t query_id);
+    std::shared_ptr<VortexANNResult> get_result(query_id_t query_id);
     void dump_timestamps(bool dump_remote = true);
 };
 

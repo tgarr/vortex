@@ -262,6 +262,52 @@ public:
     void reset();
 };
 
+/*
+ * This encapsulates the results of the ANN search.
+ * 
+ */
+class VortexANNResult {
+    std::shared_ptr<uint8_t> buffer;
+
+    uint64_t query_id;
+    uint32_t top_k;
+    uint32_t ids_position;
+    uint32_t dist_position;
+
+public:
+    VortexANNResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t ids_position,uint32_t dist_position,uint32_t top_k);
+
+    query_id_t get_query_id();
+    const long * get_ids_pointer();
+    uint32_t get_top_k();
+    const float * get_distances_pointer();
+};
+
+/* 
+ * This class manages a batch of client notifications received from UDL3.
+ *
+ */
+
+class ClientNotificationManager {
+    std::shared_ptr<uint8_t> buffer;
+    uint64_t buffer_size;
+    uint32_t num_results;
+    uint32_t top_k;
+    uint32_t header_size;
+    uint32_t query_ids_size;
+    uint32_t doc_ids_size;
+    uint32_t dist_size;
+
+    std::vector<std::shared_ptr<VortexANNResult>> results;
+    
+    void create_results();
+
+public:
+    ClientNotificationManager(std::shared_ptr<uint8_t> buffer,uint64_t buffer_size);
+    const std::vector<std::shared_ptr<VortexANNResult>>& get_results();
+    uint64_t count();
+};
+
 
 /*
  * Helper functions
