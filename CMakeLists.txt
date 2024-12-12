@@ -8,7 +8,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(nlohmann_json 3.2.0 REQUIRED)
 find_package(CURL REQUIRED)
-find_package(OpenSSL REQUIRED)
 find_package(spdlog 1.3.1 REQUIRED)
 find_package(derecho CONFIG REQUIRED)
 find_package(cascade CONFIG REQUIRED)
@@ -59,14 +58,6 @@ target_compile_definitions(run_benchmark PRIVATE
     LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
 )
 
-add_executable(latency_client benchmark/vortex_client.cpp benchmark/latency_client.cpp vortex_udls/serialize_utils.cpp)
-target_link_libraries(latency_client PRIVATE libwsong::perf derecho derecho::cascade pthread OpenSSL::Crypto)
-target_compile_definitions(latency_client PRIVATE
-    LOG_TAG_QUERIES_SENDING_START=${LOG_TAG_QUERIES_SENDING_START}
-    LOG_TAG_QUERIES_SENDING_END=${LOG_TAG_QUERIES_SENDING_END}
-    LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED=${LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED}
-)
-
 add_executable(start_webservice webservice/start_webservice.cpp webservice/webservice.cpp webservice/vortex_webservice.cpp webservice/cascade_client.cpp vortex_udls/serialize_utils.cpp)
 target_link_libraries(start_webservice ${Boost_LIBRARIES} derecho::cascade)
 
@@ -107,7 +98,7 @@ add_library(centroids_search_udl SHARED
                             vortex_udls/serialize_utils.cpp 
                             vortex_udls/grouped_embeddings_for_search.cpp
                             vortex_udls/api_utils.cpp)
-target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS} CURL::libcurl)
+target_link_libraries(centroids_search_udl PRIVATE ${UDL_COMMON_LIBS})
 target_compile_definitions(centroids_search_udl PRIVATE
     LOG_CENTROIDS_EMBEDDINGS_UDL_START=${LOG_CENTROIDS_EMBEDDINGS_UDL_START}
     LOG_CENTROIDS_EMBEDDINGS_LOADING_START=${LOG_CENTROIDS_EMBEDDINGS_LOADING_START}
@@ -168,7 +159,7 @@ add_library(aggregate_generate_udl SHARED
             vortex_udls/aggregate_generate_udl.cpp 
             vortex_udls/serialize_utils.cpp 
             vortex_udls/api_utils.cpp)
-target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade CURL::libcurl)
+target_link_libraries(aggregate_generate_udl PRIVATE derecho::cascade)
 
 target_compile_definitions(aggregate_generate_udl PRIVATE
     LOG_TAG_AGG_UDL_END=${LOG_TAG_AGG_UDL_END}
@@ -248,12 +239,18 @@ add_custom_command(TARGET aggregate_generate_udl POST_BUILD
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/setup
     COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/setup
         ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/setup
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/latency_client
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/latency_client
-    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/latency_client
-        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/latency_client
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/run_benchmark
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/run_benchmark
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/run_benchmark
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/run_benchmark
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/run_benchmark
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/run_benchmark
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/start_webservice
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n2/start_webservice
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/start_webservice
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n3/start_webservice
+    COMMAND ln -sf ${CMAKE_CURRENT_BINARY_DIR}/start_webservice
+        ${CMAKE_CURRENT_BINARY_DIR}/cfg/n4/start_webservice
     COMMAND chmod 755 ${CMAKE_CURRENT_BINARY_DIR}/cfg/clear_log.sh.tmp
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cfg/clear_log.sh.tmp
             ${CMAKE_CURRENT_SOURCE_DIR}/cfg/layout.json.tmp

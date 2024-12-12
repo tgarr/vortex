@@ -12,14 +12,12 @@
 #include <cascade/cascade_interface.hpp>
 
 #include "serialize_utils.hpp"
-#include "api_utils.hpp"
 
 namespace derecho {
 namespace cascade {
 
 #define MY_UUID "11a3c123-3300-31ac-1866-0003ac330000"
 #define MY_DESC "UDL to aggregate the knn search results for each query from the clusters and run LLM with the query and its top_k closest docs."
-#define MAX_NUM_REPLIES_PER_NOTIFICATION_MESSAGE 100  // limited by Cascade p2p RPC message size
 
 std::string get_uuid() {
     return MY_UUID;

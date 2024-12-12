@@ -4,9 +4,6 @@
 #include <string>
 #include <cascade/service_client_api.hpp>
 
-#define QUERY_BATCH_ID_MODULUS 100000
-#define CLUSTER_KEY_DELIMITER "_cluster"
-
 /* 
  * EmbeddingQuery encapsulates a single embedding query that is part of a batch. 
  * Operations are performed on demand and directly from the buffer of the whole batch.
@@ -317,28 +314,6 @@ public:
 std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str); // at UDL1
 uint64_t parse_cluster_id(const std::string &str); // at UDL2
 
-
-// old functions below (maintaining for compatibility)
-
-
-
-std::string format_query_emb_object(int nq, std::unique_ptr<float[]>& xq, std::vector<std::string>& query_list, uint32_t embedding_dim);
-
-/***
-* Helper function for logging purpose, to extract the query information from the key
-* @param key_string the key string to extract the query information from
-* @param delimiter the delimiter to separate the number from the key string
-* @param number the number extracted from the key string
-* @note the function truncate the number string if it exceeds the length that an int can handle
-***/
-bool parse_number(const std::string& key_string, const std::string& delimiter, int& number) ;
-
-
-bool parse_batch_id(const std::string& key_string, int& client_id, int& batch_id);
-
-
-bool parse_query_info(const std::string& key_string, int& client_id, int& batch_id, int& cluster_id, int& qid);
-
 struct CompareObjKey {
      bool operator()(const std::string& key1, const std::string& key2) const {
           size_t pos = key1.rfind("/");
@@ -356,56 +331,3 @@ struct CompareObjKey {
 */
 std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filter_exact_matched_keys(std::vector<std::string>& obj_keys, const std::string& prefix);
 
-/*** 
-* Helper function to cdpo_handler()
-* @param bytes the bytes object to deserialize
-* @param data_size the size of the bytes object
-* @param nq the number of queries in the blob object, output. Used by FAISS search.
-     type is uint32_t because in previous encode_centroids_search_udl, it is serialized from an unsigned "big" ordered int
-* @param query_embeddings the embeddings of the queries, output. 
-***/
-void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
-                                                            const std::size_t& data_size,
-                                                            uint32_t& nq,
-                                                            const int& emb_dim,
-                                                            float*& query_embeddings,
-                                                            std::vector<std::string>& query_list);
-
-void new_deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
-                                                            const std::size_t& data_size,
-                                                            uint32_t& nq,
-                                                            const int& emb_dim,
-                                                            float*& query_embeddings,
-                                                            std::vector<std::string>& query_list);
-
-/***
-* Format the search results for each query to send to the next UDL.
-* The format is | top_k | embeding_id_vector | distance_vector | query_text |
-***/
-std::string serialize_cluster_search_result(uint32_t top_k, long* I, float* D, int idx, const std::string& query_text);
-
-
-struct DocIndex{
-     int cluster_id;
-     long emb_id;
-     float distance;
-     bool operator<(const DocIndex& other) const {
-          return distance < other.distance;
-     }
-};
-
-inline std::ostream& operator<<(std::ostream& os, const DocIndex& doc_index) {
-     os << "cluster_id: " << doc_index.cluster_id << ", emb_id: " << doc_index.emb_id << ", distance: " << doc_index.distance;
-     return os;
-}
-
-
-/***
- * Helper function to aggregate cdpo_handler()
- * 
-***/
-void deserialize_cluster_search_result_from_bytes(const int& cluster_id,
-                                                  const uint8_t* bytes,
-                                                  const size_t& data_size,
-                                                  std::string& query_text,
-                                                  std::vector<DocIndex>& cluster_results);

@@ -4,7 +4,6 @@
 #include <unordered_map>
 
 #include "grouped_embeddings_for_search.hpp"
-#include "api_utils.hpp"
 
 
 namespace derecho{

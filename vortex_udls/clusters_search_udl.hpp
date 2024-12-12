@@ -11,7 +11,6 @@
 #include <derecho/openssl/hash.hpp>
 
 #include "grouped_embeddings_for_search.hpp"
-#include "api_utils.hpp"
 
 
 namespace derecho{
