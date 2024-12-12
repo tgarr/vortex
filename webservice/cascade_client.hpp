@@ -13,6 +13,7 @@
 #include <atomic>
 #include <unordered_map>
 #include <shared_mutex>
+#include "../vortex_udls/serialize_utils.hpp"
 
 using namespace derecho::cascade;
 
@@ -26,9 +27,6 @@ using namespace derecho::cascade;
 #define UDL2_SUBGROUP_INDEX 1
 #define UDL3_SUBGROUP_INDEX 2
 #define UDLS_SUBGROUP_TYPE VolatileCascadeStoreWithStringKey 
-
-using query_id_t = uint64_t; 
-using queued_query_t = std::tuple<query_id_t,std::string,const float*>;
 
 class VortexCascadeClient {
     /*
@@ -55,7 +53,6 @@ class VortexCascadeClient {
         ClientThread(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim);
         void push_query(queued_query_t &queued_query);
         void signal_stop();
-        std::unordered_map<uint64_t,uint64_t> batch_size;
 
         inline void start(){
             running = true;
@@ -77,7 +74,7 @@ class VortexCascadeClient {
         std::mutex thread_mtx;
         std::condition_variable thread_signal;
 
-        std::queue<Blob> to_process;
+        std::queue<std::pair<std::shared_ptr<uint8_t>,uint64_t>> to_process;
         VortexCascadeClient* vortex;
 
         void main_loop();
@@ -110,8 +107,8 @@ class VortexCascadeClient {
     query_id_t next_query_id();
 
     std::shared_mutex result_mutex;
-    std::unordered_map<query_id_t,std::promise<std::vector<std::string>>> result;
-    void result_received(nlohmann::json &result_json);
+    std::unordered_map<query_id_t,std::promise<std::shared_ptr<VortexANNResult>>> result;
+    void ann_result_received(std::shared_ptr<VortexANNResult> result);
 
     public:
 
@@ -119,6 +116,6 @@ class VortexCascadeClient {
     ~VortexCascadeClient();
     
     void setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim,uint64_t num_result_threads);
-    std::future<std::vector<std::string>> query(const std::string& query,const float* query_emb);
+    std::future<std::shared_ptr<VortexANNResult>> query_ann(std::shared_ptr<float> query_emb);
 };
 
