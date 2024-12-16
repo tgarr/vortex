@@ -96,6 +96,9 @@ private:
                                DefaultCascadeContextType* typed_ctxt,
                                uint32_t worker_id) override;
 
+    std::unordered_map<uint64_t,std::unordered_map<long,long>> cluster_doc_table; // maps the local cluster doc ids to the global ids
+    bool load_doc_table(DefaultCascadeContextType* typed_ctxt, uint64_t cluster_id);
+
     /* 
      * The code below should be moved to the new UDL4, which will be responsible for getting the documents and calling/running the LLM
      *

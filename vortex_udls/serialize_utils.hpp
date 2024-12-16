@@ -112,12 +112,14 @@ class ClusterSearchResult {
     uint64_t query_id;
     uint32_t top_k;
     uint32_t client_id,text_position,text_size,ids_position,ids_size,dist_position,dist_size;
+    uint64_t cluster_id;
+
     std::shared_ptr<std::string> text;
     bool from_buffer = false;
 
 public:
-    ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,std::shared_ptr<long> ids,std::shared_ptr<float> dist,uint64_t idx,uint32_t top_k); // created from an EmbeddingQuery and the results from FAISS (at UDL2)
-    ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t metadata_position,uint32_t top_k); // created from a serialized buffer (at UDL3)
+    ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,std::shared_ptr<long> ids,std::shared_ptr<float> dist,uint64_t idx,uint32_t top_k,uint64_t cluster_id); // created from an EmbeddingQuery and the results from FAISS (at UDL2)
+    ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t metadata_position,uint32_t top_k,uint64_t cluster_id); // created from a serialized buffer (at UDL3)
 
     query_id_t get_query_id();
     uint32_t get_client_id();
@@ -127,6 +129,7 @@ public:
     const float * get_distances_pointer();
     const uint8_t * get_text_pointer();
     uint32_t get_text_size();
+    uint64_t get_cluster_id();
 };
 
 /*
@@ -169,13 +172,14 @@ class ClusterSearchResultBatchManager {
     uint32_t top_k;
     uint32_t header_size;
     uint32_t metadata_size;
+    uint64_t cluster_id;
 
     std::vector<std::shared_ptr<ClusterSearchResult>> results;
     
     void create_results();
 
 public:
-    ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size);
+    ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t cluster_id);
     const std::vector<std::shared_ptr<ClusterSearchResult>>& get_results();
     uint64_t count();
 };
@@ -216,9 +220,10 @@ class ClusterSearchResultsAggregate {
     std::shared_ptr<ClusterSearchResult> first_result; // so we can get data like query_text without copying
     std::unique_ptr<AggregatePriorityQueue> agg_top_k_results;
     std::unordered_map<long,float> distance;
+    const std::unordered_map<uint64_t,std::unordered_map<long,long>> *cluster_doc_table;
 
 public:
-    ClusterSearchResultsAggregate(std::shared_ptr<ClusterSearchResult> result,uint32_t total_num_results, uint32_t top_k);
+    ClusterSearchResultsAggregate(std::shared_ptr<ClusterSearchResult> result,uint32_t total_num_results, uint32_t top_k,const std::unordered_map<uint64_t,std::unordered_map<long,long>> *cluster_doc_table);
 
     void add_result(std::shared_ptr<ClusterSearchResult> result);
     bool all_results_received();
@@ -313,6 +318,7 @@ public:
 
 std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str); // at UDL1
 uint64_t parse_cluster_id(const std::string &str); // at UDL2
+uint64_t parse_cluster_id_udl3(const std::string &str); // at UDL3
 
 struct CompareObjKey {
      bool operator()(const std::string& key1, const std::string& key2) const {

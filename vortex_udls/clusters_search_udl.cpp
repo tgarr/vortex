@@ -140,7 +140,7 @@ std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> ClustersSearc
     std::shared_ptr<float> dist(D);
     std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> results = std::make_unique<std::vector<std::shared_ptr<ClusterSearchResult>>>();
     for(uint64_t i=0;i<num_queries;i++){
-        ClusterSearchResult *res = new ClusterSearchResult(queries[i],ids,dist,i,parent->top_k);
+        ClusterSearchResult *res = new ClusterSearchResult(queries[i],ids,dist,i,parent->top_k,parent->cluster_id);
         results->emplace_back(res);
     }
 
@@ -259,7 +259,7 @@ void ClustersSearchOCDPO::BatchingThread::main_loop(DefaultCascadeContextType* t
                 batcher.serialize();
 
                 ObjectWithStringKey obj;
-                obj.key = EMIT_AGGREGATE_PREFIX "/results_qid" + std::to_string(item.first);
+                obj.key = EMIT_AGGREGATE_PREFIX "/results_cluster" + std::to_string(parent->cluster_id);
                 obj.blob = std::move(*batcher.get_blob());
 
                 typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, AGGREGATE_SUBGROUP_INDEX, item.first, true);

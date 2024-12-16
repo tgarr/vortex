@@ -276,7 +276,7 @@ void EmbeddingQueryBatchManager::create_queries(){
  * ClusterSearchResult implementation
  */
 
-ClusterSearchResult::ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,std::shared_ptr<long> ids,std::shared_ptr<float> dist,uint64_t idx,uint32_t top_k){
+ClusterSearchResult::ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,std::shared_ptr<long> ids,std::shared_ptr<float> dist,uint64_t idx,uint32_t top_k,uint64_t cluster_id){
     // from query
     query_id = query->query_id;
     client_id = query->node_id;
@@ -287,6 +287,7 @@ ClusterSearchResult::ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,s
     this->ids = ids;
     this->dist = dist;
     this->top_k = top_k;
+    this->cluster_id = cluster_id;
 
     ids_size = top_k * sizeof(long);
     ids_position = idx;
@@ -297,10 +298,11 @@ ClusterSearchResult::ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,s
     from_buffer = false;
 }
 
-ClusterSearchResult::ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t metadata_position,uint32_t top_k){
+ClusterSearchResult::ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_t query_id,uint32_t metadata_position,uint32_t top_k,uint64_t cluster_id){
     this->buffer = buffer;
     this->query_id = query_id;
     this->top_k = top_k;
+    this->cluster_id = cluster_id;
 
     // get metadata: client_id,text_position,text_size,ids_position,ids_size,dist_position,dist_size
     const uint32_t *metadata = reinterpret_cast<uint32_t*>(buffer.get()+metadata_position+sizeof(query_id_t));
@@ -317,6 +319,10 @@ ClusterSearchResult::ClusterSearchResult(std::shared_ptr<uint8_t> buffer,uint64_
 
 uint32_t ClusterSearchResult::get_top_k(){
     return top_k;
+}
+
+uint64_t ClusterSearchResult::get_cluster_id(){
+    return cluster_id;
 }
 
 std::shared_ptr<std::string> ClusterSearchResult::get_text(){
@@ -452,10 +458,11 @@ void ClusterSearchResultBatcher::reset(){
  * ClusterSearchResultBatchManager implementation
  */
 
-ClusterSearchResultBatchManager::ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size){
+ClusterSearchResultBatchManager::ClusterSearchResultBatchManager(const uint8_t *buffer,uint64_t buffer_size,uint64_t cluster_id){
     const uint32_t *header = reinterpret_cast<const uint32_t *>(buffer);
     this->num_results = header[0];
     this->top_k = header[1];
+    this->cluster_id = cluster_id;
     
     this->header_size = sizeof(uint32_t) * 2;
     this->metadata_size = sizeof(uint32_t) * 7 + sizeof(query_id_t);
@@ -484,7 +491,7 @@ void ClusterSearchResultBatchManager::create_results(){
     for(uint32_t i=0;i<num_results;i++){
         uint32_t metadata_position = header_size + (i * metadata_size);
         query_id_t query_id = *reinterpret_cast<query_id_t*>(buffer.get()+metadata_position);
-        results.emplace_back(new ClusterSearchResult(buffer,query_id,metadata_position,top_k));
+        results.emplace_back(new ClusterSearchResult(buffer,query_id,metadata_position,top_k,cluster_id));
     }
 }
 
@@ -501,11 +508,12 @@ bool DocIDComparison::operator() (const long& l, const long& r) const {
     return aggregate->get_distance(l) < aggregate->get_distance(r);
 }
 
-ClusterSearchResultsAggregate::ClusterSearchResultsAggregate(std::shared_ptr<ClusterSearchResult> result,uint32_t total_num_results, uint32_t top_k) {
+ClusterSearchResultsAggregate::ClusterSearchResultsAggregate(std::shared_ptr<ClusterSearchResult> result,uint32_t total_num_results, uint32_t top_k,const std::unordered_map<uint64_t,std::unordered_map<long,long>> *cluster_doc_table) {
     this->total_num_results = total_num_results;
     this->received_results = 0;
     this->top_k = top_k;
     this->first_result = result;
+    this->cluster_doc_table = cluster_doc_table;
 
     DocIDComparison comp(this);
     this->agg_top_k_results = std::make_unique<AggregatePriorityQueue>(comp);
@@ -523,8 +531,10 @@ void ClusterSearchResultsAggregate::add_result(std::shared_ptr<ClusterSearchResu
     // add the doc IDs to the max heap, and keep the size of the heap to be top_k
     const long * ids = result->get_ids_pointer();
     const float * dist = result->get_distances_pointer();
+    uint64_t cluster_id = result->get_cluster_id();
+    const auto& doc_table = cluster_doc_table->at(cluster_id);
     for(uint32_t i=0; i<result->get_top_k(); i++){
-        long doc_id = ids[i];
+        long doc_id = doc_table.at(ids[i]); // map local id to global id
         distance[doc_id] = dist[i];
 
         if (agg_top_k_results->size() < top_k) {
@@ -740,6 +750,11 @@ std::pair<uint32_t,uint64_t> parse_client_and_batch_id(const std::string &str){
 
 uint64_t parse_cluster_id(const std::string &str){
     return std::stoull(str.substr(8)); // str is '/cluster[0-9]+'
+}
+
+uint64_t parse_cluster_id_udl3(const std::string &str){
+    size_t pos = str.find("_cluster");
+    return std::stoull(str.substr(pos+8)); // str is '/agg/results_cluster[0-9]+'
 }
 
 /*** Helper function to callers of list_key:

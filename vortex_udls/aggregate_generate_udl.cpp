@@ -55,7 +55,7 @@ void AggGenOCDPO::ProcessThread::process_result(std::shared_ptr<ClusterSearchRes
     // add results together with results received before
     query_id_t query_id = result->get_query_id();
     if(results_aggregate.count(query_id) == 0){
-        results_aggregate[query_id] = std::make_unique<ClusterSearchResultsAggregate>(result,parent->top_num_centroids, parent->top_k);
+        results_aggregate[query_id] = std::make_unique<ClusterSearchResultsAggregate>(result,parent->top_num_centroids, parent->top_k,&parent->cluster_doc_table);
     } else {
         results_aggregate[query_id]->add_result(result);
     }
@@ -182,9 +182,18 @@ void AggGenOCDPO::ocdpo_handler(const node_id_t sender,
                                 DefaultCascadeContextType* typed_ctxt, 
                                 uint32_t worker_id) {
 
+    uint64_t cluster_id = parse_cluster_id_udl3(key_string);
+    if(cluster_doc_table.count(cluster_id) == 0){
+        if(!load_doc_table(typed_ctxt,cluster_id)){
+            std::cerr << "Error: doc table could not be loaded for cluster " << cluster_id << std::endl;
+            dbg_default_error("doc table could not be loaded at AggGenOCDPO");
+            return;
+        }
+    }
+
     TimestampLogger::log(LOG_TAG_AGG_UDL_START,my_id,0,sender); // TODO revise
     
-    std::unique_ptr<ClusterSearchResultBatchManager> batch_manager = std::make_unique<ClusterSearchResultBatchManager>(object.blob.bytes,object.blob.size);
+    std::unique_ptr<ClusterSearchResultBatchManager> batch_manager = std::make_unique<ClusterSearchResultBatchManager>(object.blob.bytes,object.blob.size,cluster_id);
     
     TimestampLogger::log(LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE, my_id, 0, sender); // TODO revise
    
@@ -239,13 +248,11 @@ void AggGenOCDPO::shutdown() {
     }
 }
 
-/* 
- * The code below should be moved to the new UDL4, which will be responsible for getting the documents and calling/running the LLM
- *
-bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int cluster_id) {
-    if (doc_tables.find(cluster_id) != doc_tables.end()) {
+bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, uint64_t cluster_id) {
+    if (cluster_doc_table.count(cluster_id) > 0){
         return true;
     }
+
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_START, my_id, 0, cluster_id);
     // check the keys for this grouped embedding objects stored in cascade
     //    because of the message size, the map for one cluster may split into multiple chunks stored in Cascade
@@ -259,6 +266,7 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
         dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, table_prefix);
         return -1;
     }
+
     std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filtered_keys = filter_exact_matched_keys(map_obj_keys, table_prefix);
     // get the doc table objects and save to local cache
     while(!filtered_keys.empty()){
@@ -276,7 +284,7 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
         try{
             nlohmann::json doc_table_json = nlohmann::json::parse(json_str);
             for (const auto& [emb_index, pathname] : doc_table_json.items()) {
-                this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
+                this->cluster_doc_table[cluster_id][std::stol(emb_index)] = pathname.get<long>();
             }
         } catch (const nlohmann::json::parse_error& e) {
             std::cerr << "Error: load_doc_table JSON parse error: " << e.what() << std::endl;
@@ -288,6 +296,9 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
     return true;
 }
 
+/* 
+ * The code below should be moved to the new UDL4, which will be responsible for getting the documents and calling/running the LLM
+ *
 bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc) {
     std::shared_lock<std::shared_mutex> read_lock(doc_cache_mutex);
     if (doc_contents.find(cluster_id) != doc_contents.end()) {
