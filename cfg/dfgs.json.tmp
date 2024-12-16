@@ -12,7 +12,7 @@
                     {
                         "centroids_emb_prefix":"/rag/emb/centroids_obj",
                         "emb_dim":1024,
-                        "top_num_centroids":2,
+                        "top_num_centroids":3,
                         "faiss_search_type":0,
                         "num_search_threads":1,
                         "min_batch_size":1,
@@ -33,7 +33,7 @@
                 "user_defined_logic_config_list": [
                 {
                         "emb_dim":1024,
-                        "top_k":3,
+                        "top_k":20,
                         "faiss_search_type":0,
                         "min_batch_size":1,
                         "max_batch_size":100,
@@ -50,8 +50,8 @@
                 "user_defined_logic_stateful_list": ["singlethreaded"],
                 "user_defined_logic_config_list": [
                 { 
-                        "top_num_centroids":2,
-                        "final_top_k":2,
+                        "top_num_centroids":3,
+                        "final_top_k":10,
                         "batch_time_us":1000,
                         "min_batch_size":1,
                         "max_batch_size":100,
