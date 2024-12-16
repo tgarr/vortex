@@ -290,10 +290,10 @@ ClusterSearchResult::ClusterSearchResult(std::shared_ptr<EmbeddingQuery> query,s
     this->cluster_id = cluster_id;
 
     ids_size = top_k * sizeof(long);
-    ids_position = idx;
+    ids_position = idx * top_k;
         
     dist_size = top_k * sizeof(float);
-    dist_position = idx;
+    dist_position = idx * top_k;
     
     from_buffer = false;
 }

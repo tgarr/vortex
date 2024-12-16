@@ -60,7 +60,7 @@ uint64_t PendingEmbeddingQueryBatch::add_queries(const std::vector<std::shared_p
         const uint8_t *buffer,
         uint32_t embeddings_position,
         uint32_t embeddings_size){
-    if(num_to_add > capacity()){
+    if(num_to_add > space_left()){
         std::cerr << "Trying to add more queries than the capacity of the buffer" << std::endl;
         return 0;
     }
@@ -70,7 +70,7 @@ uint64_t PendingEmbeddingQueryBatch::add_queries(const std::vector<std::shared_p
     std::memcpy(reinterpret_cast<uint8_t*>(embeddings)+start_pos,buffer+embeddings_position,embeddings_size);
     
     // copy queries
-    for(uint64_t i=0;i<num_to_add;i++){
+    for(uint64_t i=0;i<num_to_add;i++){ 
         uint64_t idx = query_start_index + i;
         queries.push_back(queries_to_add[idx]);
         num_queries++;
