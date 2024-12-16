@@ -56,6 +56,7 @@ class VortexBenchmarkClient {
         void push_query(queued_query_t &queued_query);
         void signal_stop();
         std::unordered_map<uint64_t,uint64_t> batch_size;
+        uint64_t batch_id = 0;
 
         inline void start(){
             running = true;
@@ -104,6 +105,9 @@ class VortexBenchmarkClient {
     uint64_t emb_dim = 1024;
     uint64_t num_result_threads = 1;
     uint64_t next_thread = 0;
+
+    std::unordered_map<query_id_t,std::chrono::steady_clock::time_point> query_send_time;
+    std::unordered_map<query_id_t,std::chrono::steady_clock::time_point> query_result_time;
 
     std::mutex query_id_mtx;
     uint64_t query_count = 0;

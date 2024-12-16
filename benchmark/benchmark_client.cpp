@@ -16,22 +16,70 @@ VortexBenchmarkClient::~VortexBenchmarkClient(){
         t.join();
     }
 
-    // print batching statistics
+    // print e2e performance statistics (discarding the first 10%)
+    std::vector<query_id_t> queries;
+    for (const auto& [query_id, send_time] : query_send_time){
+        if(query_result_time.count(query_id) == 0) continue;
+        queries.push_back(query_id);
+    }
+    std::sort(queries.begin(),queries.end());
+
+    uint64_t num_queries = queries.size();
+    uint64_t skip = (uint64_t)(num_queries * 0.1);
+    std::vector<double> latencies;
+    std::chrono::steady_clock::time_point first = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point last;
+    double sum = 0.0;
+    for(uint64_t i=skip; i<num_queries; i++){
+        auto query_id = queries[i];
+        auto& sent = query_send_time[query_id];
+        auto& received = query_result_time[query_id];
+        std::chrono::microseconds elapsed = std::chrono::duration_cast<std::chrono::microseconds>(received - sent);
+
+        double lat = static_cast<double>(elapsed.count()) / 1000.0;
+        latencies.push_back(lat);
+        sum += lat;
+
+        first = std::min(first,sent);
+        last = std::max(last,received);
+    }
+
+    std::chrono::microseconds total_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(last - first);
+    double total_time = static_cast<double>(total_elapsed.count()) / 1000000.0;
+    double throughput = (num_queries-skip) / total_time;
+    std::sort(latencies.begin(),latencies.end());
+    double avg = sum / latencies.size();
+    double min = latencies.front();
+    double max = latencies.back();
+    auto median = latencies[latencies.size()/2];
+    auto p95 = latencies[(uint64_t)(latencies.size()*0.95)];
+
+    std::cout << "Throughput: " << throughput << " queries/s" << " (" << num_queries-skip << " queries in " << total_time << " seconds)" << std::endl;
+    std::cout << "E2E latency:" << std::endl;
+    std::cout << "  avg: " << avg << std::endl;
+    std::cout << "  median: " << median << std::endl;
+    std::cout << "  min: " << min << std::endl;
+    std::cout << "  max: " << max << std::endl;
+    std::cout << "  p95: " << p95 << std::endl;
+
+    // print batching statistics (discarding the first 10%)
     std::cout << "batching statistics:" << std::endl;
     std::vector<uint64_t> values;
     values.reserve(client_thread->batch_size.size());
-    double sum = 0.0;
+    uint64_t start = (uint64_t)(client_thread->batch_id * 0.1);
+    sum = 0.0;
     for(const auto& [batch_id, sz] : client_thread->batch_size){
+        if(batch_id < start) continue;
         values.push_back(sz);
         sum += sz;
     }
 
-    double avg = sum / client_thread->batch_size.size();
+    avg = sum / values.size();
     std::sort(values.begin(),values.end());
-    auto min = values.front();
-    auto max = values.back();
-    auto median = values[values.size()/2];
-    auto p95 = values[(uint64_t)(values.size()*0.95)];
+    min = values.front();
+    max = values.back();
+    median = values[values.size()/2];
+    p95 = values[(uint64_t)(values.size()*0.95)];
 
     std::cout << "  avg: " << avg << std::endl;
     std::cout << "  median: " << median << std::endl;
@@ -104,6 +152,7 @@ query_id_t VortexBenchmarkClient::next_query_id(){
 uint64_t VortexBenchmarkClient::query(std::shared_ptr<std::string> query,std::shared_ptr<float> query_emb){
     query_id_t query_id = VortexBenchmarkClient::next_query_id();
     queued_query_t new_query(query_id,my_id,query_emb,query);
+    query_send_time[query_id] = std::chrono::steady_clock::now();
     client_thread->push_query(new_query);
     return query_id;
 }
@@ -138,6 +187,8 @@ void VortexBenchmarkClient::ann_result_received(std::shared_ptr<VortexANNResult>
     std::unique_lock<std::shared_mutex> lock(result_mutex);
     result.emplace(query_id,res);
     result_count++;
+    
+    query_result_time[query_id] = std::chrono::steady_clock::now();
     
     TimestampLogger::log(LOG_TAG_QUERIES_RESULT_CLIENT_RECEIVED,my_id,query_id,0); // TODO revise
 }
@@ -177,7 +228,6 @@ void VortexBenchmarkClient::ClientThread::main_loop(){
     id_list.reserve(batch_max_size);
     auto wait_start = std::chrono::steady_clock::now();
     auto batch_time = std::chrono::microseconds(batch_time_us);
-    uint64_t batch_id = 0;
     while(true){
         std::unique_lock<std::mutex> lock(thread_mtx);
         if(query_queue.empty()){
