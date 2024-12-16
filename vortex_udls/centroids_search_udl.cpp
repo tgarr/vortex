@@ -33,39 +33,14 @@ bool CentroidsSearchOCDPO::ProcessBatchedTasksThread::get_queries_and_emebddings
                                                         std::vector<std::string>& query_list,
                                                         const uint32_t& client_id,
                                                         const uint32_t& query_batch_id) {
-    // If not include_encoder, could directly deserialize the queries and embeddings from the object
-    if (!parent->include_encoder){
-        try{
-            deserialize_embeddings_and_quries_from_bytes(blob->bytes,blob->size,nq,parent->emb_dim,data,query_list);
-        } catch (const std::exception& e) {
-            std::cerr << "Error: failed to deserialize the query embeddings and query texts from the object." << std::endl;
-            dbg_default_error("{}, Failed to deserialize the query embeddings and query texts from the object.", __func__);
-            return false;
-        }
-    } else {
-        // compute the embeddings from the query texts
-        try{
-            // get the query texts from the object
-            nlohmann::json query_texts_json = nlohmann::json::parse(reinterpret_cast<const char*>(blob->bytes), 
-                                                                    reinterpret_cast<const char*>(blob->bytes) + blob->size);
-            query_list = query_texts_json.get<std::vector<std::string>>();
-            nq = query_list.size();
-            data = new float[parent->emb_dim * nq];
-            // compute the embeddings via open AI API call
-            if (!api_utils::get_batch_embeddings(query_list, parent->encoder_name, parent->openai_api_key, parent->emb_dim, data)) {
-                std::cerr << "Error: failed to get the embeddings from the query texts via OpenAI API." << std::endl;
-                dbg_default_error("{}, Failed to get the embeddings from the query texts via OpenAI API.", __func__);
-                delete[] data; 
-                data = nullptr;
-                return false;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "Error: failed to compute the embeddings from the query texts." << std::endl;
-            dbg_default_error("{}, Failed to compute the embeddings from the query texts.", __func__);
-            return false;
-        }
+    try{
+        deserialize_embeddings_and_quries_from_bytes(blob->bytes,blob->size,nq,parent->emb_dim,data,query_list);
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Centroids search failed to deserialize the query embeddings and query texts from the object." << std::endl;
+        dbg_default_error("{}, Centroids Search Failed to deserialize the query embeddings and query texts from the object.", __func__);
+        return false;
     }
-    return true;
 }
 
 void CentroidsSearchOCDPO::ProcessBatchedTasksThread::combine_common_clusters(const long* I, const int nq, std::map<long, std::vector<int>>& cluster_ids_to_query_ids){
@@ -115,6 +90,7 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
             trigger the subsequent UDL by evict the queries to shards that contains its top cluster_embs 
             according to affinity set sharding policy
     ***/
+    auto num_shards = typed_ctxt->get_service_client_ref().get_number_of_shards<VolatileCascadeStoreWithStringKey>(NEXT_UDL_SUBGROUP_ID);
     std::map<long, std::vector<int>> cluster_ids_to_query_ids = std::map<long, std::vector<int>>();
     this->combine_common_clusters(I, nq, cluster_ids_to_query_ids);
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
@@ -153,14 +129,12 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_p
         obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emb_string.c_str()), query_emb_string.size());
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
 
-        typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first), true); // TODO: change this hard-coded subgroup_id
+        typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first) % num_shards, true); // TODO: change this hard-coded subgroup_id
         TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
         dbg_default_trace("[Centroids search ocdpo]: Emitted key: {}",new_key);
     }
     delete[] I;
     delete[] D;
-    if (parent->include_encoder && data) 
-        delete[] data;
     // after using the batched task's blob data, release the memory
     // task_ptr->blob.memory_mode = derecho::cascade::object_memory_mode_t::DEFAULT;
     TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
@@ -177,6 +151,9 @@ void CentroidsSearchOCDPO::ProcessBatchedTasksThread::main_loop(DefaultCascadeCo
         });
         if (!running)
             break;
+        if (parent->active_tasks_queue.empty()) {
+            continue;
+        }
         std::unique_ptr<batchedTask> task = std::move(parent->active_tasks_queue.front());
         parent->active_tasks_queue.pop();
         lock.unlock();
@@ -252,9 +229,6 @@ void CentroidsSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, con
         if (config.contains("emb_dim")) this->emb_dim = config["emb_dim"].get<int>();
         if (config.contains("top_num_centroids")) this->top_num_centroids = config["top_num_centroids"].get<int>();
         if (config.contains("faiss_search_type")) this->faiss_search_type = config["faiss_search_type"].get<int>();
-        if (config.contains("include_encoder")) this->include_encoder = config["include_encoder"].get<bool>();
-        if (config.contains("encoder_name")) this->encoder_name = config["encoder_name"].get<std::string>();
-        if (config.contains("openai_api_key")) this->openai_api_key = config["openai_api_key"].get<std::string>();
         if (config.contains("emit_key_prefix")) this->emit_key_prefix = config["emit_key_prefix"].get<std::string>();
         if (this->emit_key_prefix.empty() || this->emit_key_prefix.back() != '/') this->emit_key_prefix += '/';
         this->centroids_embs = std::make_unique<GroupedEmbeddingsForSearch>(this->faiss_search_type, this->emb_dim);

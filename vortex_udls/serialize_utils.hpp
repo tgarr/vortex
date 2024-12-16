@@ -60,7 +60,7 @@ void deserialize_embeddings_and_quries_from_bytes(const uint8_t* bytes,
 * Format the search results for each query to send to the next UDL.
 * The format is | top_k | embeding_id_vector | distance_vector | query_text |
 ***/
-std::string serialize_cluster_search_result(uint32_t top_k, long* I, float* D, int idx, std::string& query_text);
+std::string serialize_cluster_search_result(uint32_t top_k, long* I, float* D, int idx, const std::string& query_text);
 
 
 struct DocIndex{
