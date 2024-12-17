@@ -4,161 +4,197 @@
 namespace derecho{
 namespace cascade{
 
+// CentroidSearchThread
 
+CentroidsSearchOCDPO::CentroidSearchThread::CentroidSearchThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl) : my_thread_id(thread_id), parent(parent_udl) {}
 
-CentroidsSearchOCDPO::ProcessBatchedTasksThread::ProcessBatchedTasksThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl)
-    : my_thread_id(thread_id), parent(parent_udl), running(false) {}
-
-
-void CentroidsSearchOCDPO::ProcessBatchedTasksThread::start(DefaultCascadeContextType* typed_ctxt) {
+void CentroidsSearchOCDPO::CentroidSearchThread::start(){
     running = true;
-    real_thread = std::thread(&ProcessBatchedTasksThread::main_loop, this, typed_ctxt);
+    real_thread = std::thread(&CentroidSearchThread::main_loop, this);
 }
 
-void CentroidsSearchOCDPO::ProcessBatchedTasksThread::join() {
+void CentroidsSearchOCDPO::CentroidSearchThread::join() {
     if (real_thread.joinable()) {
         real_thread.join();
     }
 }
 
-void CentroidsSearchOCDPO::ProcessBatchedTasksThread::signal_stop() {
-    std::lock_guard<std::mutex> lock(parent->active_tasks_mutex); 
+void CentroidsSearchOCDPO::CentroidSearchThread::signal_stop() {
+    std::lock_guard<std::mutex> lock(query_queue_mutex); 
     running = false;
-    parent->active_tasks_cv.notify_all();
+    query_queue_cv.notify_all();
 }
 
-bool CentroidsSearchOCDPO::ProcessBatchedTasksThread::get_queries_and_emebddings(Blob* blob, 
-                                                        float*& data, 
-                                                        uint32_t& nq, 
-                                                        std::vector<std::string>& query_list,
-                                                        const uint32_t& client_id,
-                                                        const uint32_t& query_batch_id) {
-    try{
-        deserialize_embeddings_and_quries_from_bytes(blob->bytes,blob->size,nq,parent->emb_dim,data,query_list);
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "Error: Centroids search failed to deserialize the query embeddings and query texts from the object." << std::endl;
-        dbg_default_error("{}, Centroids Search Failed to deserialize the query embeddings and query texts from the object.", __func__);
-        return false;
-    }
+void CentroidsSearchOCDPO::CentroidSearchThread::push(std::shared_ptr<EmbeddingQuery> query) {
+    std::unique_lock<std::mutex> lock(query_queue_mutex);
+    query_queue.push(query);
+    query_queue_cv.notify_all();
 }
 
-void CentroidsSearchOCDPO::ProcessBatchedTasksThread::combine_common_clusters(const long* I, const int nq, std::map<long, std::vector<int>>& cluster_ids_to_query_ids){
-    for (int i = 0; i < nq; i++) {
-        for (int j = 0; j < parent->top_num_centroids; j++) {
-            long cluster_id = I[i * parent->top_num_centroids + j];
-            if (cluster_ids_to_query_ids.find(cluster_id) == cluster_ids_to_query_ids.end()) {
-                cluster_ids_to_query_ids[cluster_id] = std::vector<int>();
-            }
-            cluster_ids_to_query_ids[cluster_id].push_back(i);
+void CentroidsSearchOCDPO::CentroidSearchThread::main_loop() {
+    std::unique_lock<std::mutex> lock(query_queue_mutex,std::defer_lock);
+    while (running) {
+        lock.lock();
+        if(query_queue.empty()){
+            query_queue_cv.wait(lock);
         }
+
+        if(!running) break;
+
+        auto query = query_queue.front();
+        query_queue.pop();
+        lock.unlock();
+
+        // search centroids
+        std::unique_ptr<std::vector<uint64_t>> clusters = centroid_search(query);
+
+        // push query to the batching thread on the correct clusters
+        parent->batch_thread->push(query,std::move(clusters)); 
     }
 }
 
+std::unique_ptr<std::vector<uint64_t>> CentroidsSearchOCDPO::CentroidSearchThread::centroid_search(std::shared_ptr<EmbeddingQuery> &query){
+    // TODO timestamp logging in this method should be revisited
 
-void CentroidsSearchOCDPO::ProcessBatchedTasksThread::process_task(std::unique_ptr<batchedTask> task_ptr, DefaultCascadeContextType* typed_ctxt) {
-    // 0. check if local cache contains the centroids' embeddings
-    if (parent->cached_centroids_embs == false ) {
-        if (!parent->retrieve_and_cache_centroids_index(typed_ctxt)) 
-            return;
-    }
-    // 1. get the query embeddings from the object
-    TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-    float* data;
-    uint32_t nq;
-    std::vector<std::string> query_list;
-    if (!this->get_queries_and_emebddings(&task_ptr->blob, data, nq, query_list, task_ptr->client_id, task_ptr->query_batch_id)) {
-        dbg_default_error("Failed to get the query, embeddings from the object, at centroids_search_udl.");
-        return;
-    }
-    TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
+    // get query embeddings
+    TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_START,query->get_node(),query->get_id(),parent->my_id);
+    const float *data = query->get_embeddings_pointer();
+    TimestampLogger::log(LOG_CENTROIDS_SEARCH_PREPARE_EMBEDDINGS_END,query->get_node(),query->get_id(),parent->my_id);
 
-    // 2. search the top_num_centroids that are close to the query
-    long* I = new long[parent->top_num_centroids * nq];
-    float* D = new float[parent->top_num_centroids * nq];
-    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
+    // search the top_num_centroids that are closer to the query
+    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_START,query->get_node(),query->get_id(),parent->my_id);
+    long* I = new long[parent->top_num_centroids];
+    float* D = new float[parent->top_num_centroids];
     try{
-        parent->centroids_embs->search(nq, data, parent->top_num_centroids, D, I);
+        parent->centroids_embs->search(1, data, parent->top_num_centroids, D, I);
     } catch (const std::exception& e) {
         std::cerr << "Error: failed to search the top_num_centroids for the queries." << std::endl;
         dbg_default_error("{}, Failed to search the top_num_centroids for the queries.", __func__);
-        return;
+        return {};
     }
-
-    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-    /*** 3. emit the result to the subsequent UDL
-            trigger the subsequent UDL by evict the queries to shards that contains its top cluster_embs 
-            according to affinity set sharding policy
-    ***/
-    auto num_shards = typed_ctxt->get_service_client_ref().get_number_of_shards<VolatileCascadeStoreWithStringKey>(NEXT_UDL_SUBGROUP_ID);
-    std::map<long, std::vector<int>> cluster_ids_to_query_ids = std::map<long, std::vector<int>>();
-    this->combine_common_clusters(I, nq, cluster_ids_to_query_ids);
-        TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-    for (const auto& pair : cluster_ids_to_query_ids) {
-        if (pair.first == -1) {
-            dbg_default_error( "Error: [CentroidsSearchOCDPO] for key: {} a selected cluster among top {}, has cluster_id -1", task_ptr->key, parent->top_num_centroids);
-            continue;
-        }
-        std::string new_key = parent->emit_key_prefix + task_ptr->key + "_cluster" + std::to_string(pair.first);
-        std::vector<int> query_ids = pair.second;
-
-        // create an bytes object by concatenating: num_queries + float array of emebddings + list of query_text
-        uint32_t num_queries = static_cast<uint32_t>(query_ids.size());
-        std::string nq_bytes(4, '\0');
-        nq_bytes[0] = (num_queries >> 24) & 0xFF;
-        nq_bytes[1] = (num_queries >> 16) & 0xFF;
-        nq_bytes[2] = (num_queries >> 8) & 0xFF;
-        nq_bytes[3] = num_queries & 0xFF;
-        float* query_embeddings = new float[parent->emb_dim * num_queries];
-        for (uint32_t i = 0; i < num_queries; i++) {
-            int query_id = query_ids[i];
-            for (int j = 0; j < parent->emb_dim; j++) {
-                query_embeddings[i * parent->emb_dim + j] = data[query_id * parent->emb_dim + j];
-            }
-        }
-        std::vector<std::string> query_texts;
-        for (uint32_t i = 0; i < num_queries; i++) {
-            query_texts.push_back(query_list[query_ids[i]]);
-        }
-        // serialize the query embeddings and query texts, formated as num_queries + query_embeddings + query_texts
-        std::string query_emb_string = nq_bytes +
-                                    std::string(reinterpret_cast<const char*>(query_embeddings), sizeof(float) * parent->emb_dim * num_queries) +
-                                    nlohmann::json(query_texts).dump();
-        ObjectWithStringKey obj;
-        obj.key = new_key;
-        obj.blob = Blob(reinterpret_cast<const uint8_t*>(query_emb_string.c_str()), query_emb_string.size());
-        TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
-
-        typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(pair.first) % num_shards, true); // TODO: change this hard-coded subgroup_id
-        TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,task_ptr->client_id,task_ptr->query_batch_id,pair.first);
-        dbg_default_trace("[Centroids search ocdpo]: Emitted key: {}",new_key);
+    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_SEARCH_END,query->get_node(),query->get_id(),parent->my_id);
+    dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for id: {}", query->get_id()); 
+  
+    // return result
+    std::unique_ptr<std::vector<uint64_t>> clusters = std::make_unique<std::vector<uint64_t>>();
+    clusters->reserve(parent->top_num_centroids);
+    for(uint64_t i=0;i<parent->top_num_centroids;i++){
+        clusters->push_back(static_cast<uint64_t>(I[i]));
     }
+    
     delete[] I;
     delete[] D;
-    // after using the batched task's blob data, release the memory
-    // task_ptr->blob.memory_mode = derecho::cascade::object_memory_mode_t::DEFAULT;
-    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id);
-    dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", task_ptr->key);
+    return clusters;
 }
 
+// BatchingThread
 
-void CentroidsSearchOCDPO::ProcessBatchedTasksThread::main_loop(DefaultCascadeContextType* typed_ctxt) {
-    std::unique_lock<std::mutex> lock(parent->active_tasks_mutex, std::defer_lock);
+CentroidsSearchOCDPO::BatchingThread::BatchingThread(uint64_t thread_id, CentroidsSearchOCDPO* parent_udl)
+    : my_thread_id(thread_id), parent(parent_udl), running(false) {}
+
+
+void CentroidsSearchOCDPO::BatchingThread::start(DefaultCascadeContextType* typed_ctxt) {
+    running = true;
+    real_thread = std::thread(&BatchingThread::main_loop, this, typed_ctxt);
+}
+
+void CentroidsSearchOCDPO::BatchingThread::join() {
+    if (real_thread.joinable()) {
+        real_thread.join();
+    }
+}
+
+void CentroidsSearchOCDPO::BatchingThread::signal_stop() {
+    std::lock_guard<std::mutex> lock(cluster_queue_mutex); 
+    running = false;
+    cluster_queue_cv.notify_all();
+}
+
+void CentroidsSearchOCDPO::BatchingThread::push(std::shared_ptr<EmbeddingQuery> query,std::unique_ptr<std::vector<uint64_t>> clusters){
+    std::unique_lock<std::mutex> lock(cluster_queue_mutex);
+        
+    for(auto cluster_id : *clusters){
+        if(cluster_queue.count(cluster_id) == 0){
+            cluster_queue[cluster_id] = std::make_unique<std::vector<std::shared_ptr<EmbeddingQuery>>>();
+            cluster_queue[cluster_id]->reserve(parent->max_batch_size);
+        }
+
+        cluster_queue[cluster_id]->push_back(query);
+    }
+
+    cluster_queue_cv.notify_all();
+}
+
+void CentroidsSearchOCDPO::BatchingThread::main_loop(DefaultCascadeContextType* typed_ctxt) {
+    // TODO timestamp logging in this method should be revisited
+    
+    std::unique_lock<std::mutex> lock(cluster_queue_mutex, std::defer_lock);
+    std::unordered_map<uint64_t,std::chrono::steady_clock::time_point> wait_time;
+    auto batch_time = std::chrono::microseconds(parent->batch_time_us);
     while (running) {
         lock.lock();
-        parent->active_tasks_cv.wait(lock, [&] { 
-            return parent->new_request || !parent->active_tasks_queue.empty() || !running; 
-        });
-        if (!running)
-            break;
-        if (parent->active_tasks_queue.empty()) {
-            continue;
+        bool empty = true;
+        for(auto& item : cluster_queue){
+            if(!(item.second->empty())){
+                empty = false;
+                break;
+            }
         }
-        std::unique_ptr<batchedTask> task = std::move(parent->active_tasks_queue.front());
-        parent->active_tasks_queue.pop();
+
+        if(empty){
+            cluster_queue_cv.wait_for(lock,batch_time);
+        }
+        
+        if (!running) break;
+
+        // move queue pointers out of the map and replace with empty vectors
+        std::unordered_map<uint64_t,std::unique_ptr<std::vector<std::shared_ptr<EmbeddingQuery>>>> to_send;
+        auto now = std::chrono::steady_clock::now();
+        for(auto& item : cluster_queue){
+            if(wait_time.count(item.first) == 0){
+                wait_time[item.first] = now;
+            }
+
+            if((item.second->size() >= parent->min_batch_size) || ((now-wait_time[item.first]) >= batch_time)){
+                to_send[item.first] = std::move(item.second);
+                item.second = std::make_unique<std::vector<std::shared_ptr<EmbeddingQuery>>>();
+                item.second->reserve(parent->max_batch_size);
+            }
+        }
+        
         lock.unlock();
-        this->process_task(std::move(task), typed_ctxt);
-        // std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+        auto num_shards = typed_ctxt->get_service_client_ref().get_number_of_shards<VolatileCascadeStoreWithStringKey>(NEXT_UDL_SUBGROUP_ID);
+
+        // serialize and send batches
+        for(auto& item : to_send){
+            uint64_t num_sent = 0;
+            uint64_t total = item.second->size();
+            // send in batches of maximum max_batch_size queries
+            while(num_sent < total){
+                uint64_t left = total - num_sent;
+                uint64_t batch_size = std::min(parent->max_batch_size,left);
+
+                EmbeddingQueryBatcher batcher(parent->emb_dim,batch_size);
+                for(uint64_t i=num_sent;i<(num_sent+batch_size);i++){
+                    batcher.add_query(item.second->at(i));
+                }
+                batcher.serialize();
+
+                ObjectWithStringKey obj;
+                obj.key = parent->emit_key_prefix + "/cluster" + std::to_string(item.first);
+                obj.blob = std::move(*batcher.get_blob());
+
+                typed_ctxt->get_service_client_ref().put_and_forget<VolatileCascadeStoreWithStringKey>(obj, NEXT_UDL_SUBGROUP_ID, static_cast<uint32_t>(item.first) % num_shards, true);
+
+                num_sent += batch_size;
+            }
+        }
+        
+        // TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_COMBINE_END,task_ptr->client_id,task_ptr->query_batch_id,parent->my_id); // TODO this should go somewhere else
+        // TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_START,task_ptr->client_id,task_ptr->query_batch_id,pair.first); // TODO go somewhere else
+        // TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_EMIT_END,task_ptr->client_id,task_ptr->query_batch_id,pair.first); // TODO go somewhere else
+        // TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,query->get_node(),query->get_id(),parent->my_id); // TODO go somewhere else
     }
 }
 
@@ -180,8 +216,6 @@ bool CentroidsSearchOCDPO::retrieve_and_cache_centroids_index(DefaultCascadeCont
     return true;
 }
 
-
-/*** TODO: right now , it incurs a copy of object to the vector, edit to emplace */
 void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
                             const std::string& object_pool_pathname,
                             const std::string& key_string,
@@ -191,6 +225,7 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
                             uint32_t worker_id) {
     /*** Note: this object_pool_pathname is trigger pathname prefix: /rag/emb/centroids_search instead of /rag/emb, i.e. the objp name***/
     dbg_default_trace("[Centroids search ocdpo]: I({}) received an object from sender:{} with key={}", worker_id, sender, key_string);
+
     // Logging purpose for performance evaluation
     if (key_string == "flush_logs") {
         std::string log_file_name = "node" + std::to_string(my_id) + "_udls_timestamp.dat";
@@ -199,28 +234,32 @@ void CentroidsSearchOCDPO::ocdpo_handler(const node_id_t sender,
         return;
     }
 
-    int client_id = -1;
-    int query_batch_id = -1;
-    bool usable_logging_key = parse_batch_id(key_string, client_id, query_batch_id); // Logging purpose
-    if (!usable_logging_key)
-        dbg_default_error("Failed to parse client_id and query_batch_id from key: {}, unable to track correctly.", key_string);
-    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_START,client_id,query_batch_id,this->my_id);
+    // check if local cache contains the centroids' embeddings
+    if(cached_centroids_embs == false) {
+        if(!retrieve_and_cache_centroids_index(typed_ctxt)){
+            return;
+        }
+    }
 
-    // Blob blob = std::move(const_cast<Blob&>(object.blob));
-    // blob.memory_mode = derecho::cascade::object_memory_mode_t::EMPLACED;
-    // Append the batched queries task to the queue
-    new_request = true;
-    std::unique_lock<std::mutex> lock(active_tasks_mutex); 
+    // TODO temporary, to maintain compatibility with the current logging
+    uint32_t client_id;
+    uint64_t batch_id;
+    std::tie(client_id,batch_id) = parse_client_and_batch_id(key_string);
 
-    active_tasks_queue.push(std::make_unique<batchedTask>(key_string, client_id, query_batch_id, object.blob));
-    new_request = false;
-    lock.unlock();
-    active_tasks_cv.notify_one();
-    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,client_id,query_batch_id,this->my_id);
+    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_START,client_id,batch_id,this->my_id);
+
+    // create the manager for this batch: this will copy the buffer from the object blob and deserialize the index, so we can create the individual queries wrappers
+    std::unique_ptr<EmbeddingQueryBatchManager> batch_manager = std::make_unique<EmbeddingQueryBatchManager>(object.blob.bytes,object.blob.size,emb_dim);
+    
+    // send queries to worker threads
+    for(auto& query : batch_manager->get_queries()){
+        search_threads[next_search_thread]->push(query);
+        next_search_thread = (next_search_thread + 1) % num_search_threads;
+    }
+        
+    TimestampLogger::log(LOG_CENTROIDS_EMBEDDINGS_UDL_END,client_id,batch_id,this->my_id);
     dbg_default_trace("[Centroids search ocdpo]: FINISHED knn search for key: {}", key_string);
 }
-
-
 
 void CentroidsSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, const nlohmann::json& config){
     this->my_id = typed_ctxt->get_service_client_ref().get_my_id();
@@ -229,6 +268,10 @@ void CentroidsSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, con
         if (config.contains("emb_dim")) this->emb_dim = config["emb_dim"].get<int>();
         if (config.contains("top_num_centroids")) this->top_num_centroids = config["top_num_centroids"].get<int>();
         if (config.contains("faiss_search_type")) this->faiss_search_type = config["faiss_search_type"].get<int>();
+        if (config.contains("num_search_threads")) this->num_search_threads = config["num_search_threads"].get<int>();
+        if (config.contains("min_batch_size")) this->min_batch_size = config["min_batch_size"].get<int>();
+        if (config.contains("max_batch_size")) this->max_batch_size = config["max_batch_size"].get<int>();
+        if (config.contains("batch_time_us")) this->batch_time_us = config["batch_time_us"].get<int>();
         if (config.contains("emit_key_prefix")) this->emit_key_prefix = config["emit_key_prefix"].get<std::string>();
         if (this->emit_key_prefix.empty() || this->emit_key_prefix.back() != '/') this->emit_key_prefix += '/';
         this->centroids_embs = std::make_unique<GroupedEmbeddingsForSearch>(this->faiss_search_type, this->emb_dim);
@@ -236,18 +279,34 @@ void CentroidsSearchOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, con
         std::cerr << "Error: failed to convert emb_dim or top_num_centroids from config" << std::endl;
         dbg_default_error("Failed to convert emb_dim or top_num_centroids from config, at centroids_search_udl.");
     }
-    this->process_batched_tasks_thread = std::make_unique<ProcessBatchedTasksThread>(this->my_id, this);
-    this->process_batched_tasks_thread->start(typed_ctxt);
+
+    // start search threads
+    for(uint64_t thread_id = 0; thread_id < this->num_search_threads; thread_id++) {
+        search_threads.emplace_back(new CentroidSearchThread(thread_id,this));
+    }
+    for(auto& search_thread : search_threads) {
+        search_thread->start();
+    }
+
+    // start batching thread
+    this->batch_thread = std::make_unique<BatchingThread>(this->my_id, this);
+    this->batch_thread->start(typed_ctxt);
 }
 
 void CentroidsSearchOCDPO::shutdown() {
-    if (process_batched_tasks_thread) {
-        process_batched_tasks_thread->signal_stop();
-        process_batched_tasks_thread->join();
+    for(auto& search_thread : search_threads) {
+        if(search_thread) {
+            search_thread->signal_stop();
+            search_thread->join();
+        }
+    }
+
+    if (batch_thread) {
+        batch_thread->signal_stop();
+        batch_thread->join();
     }
 }
 
-
-
 } // namespace cascade
 } // namespace derecho
+

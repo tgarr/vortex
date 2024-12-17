@@ -29,9 +29,6 @@ using namespace derecho::cascade;
 
 #define VORTEX_CLIENT_MAX_WAIT_TIME 60
 
-using query_id_t = uint64_t; 
-using queued_query_t = std::tuple<query_id_t,const std::string*,const float*>;
-
 class VortexBenchmarkClient {
     /*
      * This thread is responsible for batching queries and sending them to the first UDL in the pipeline (using trigger_put).
@@ -40,7 +37,7 @@ class VortexBenchmarkClient {
     private:
         std::thread real_thread;
         ServiceClientAPI& capi = ServiceClientAPI::get_service_client();
-        uint64_t node_id = capi.get_my_id();
+        uint32_t node_id = capi.get_my_id();
         uint64_t batch_min_size = 0;
         uint64_t batch_max_size = 5;
         uint64_t batch_time_us = 500;
@@ -59,10 +56,7 @@ class VortexBenchmarkClient {
         void push_query(queued_query_t &queued_query);
         void signal_stop();
         std::unordered_map<uint64_t,uint64_t> batch_size;
-
-        // TODO this is inefficient: we should use a global identifier (query_id_t) for each query and send it through the pipeline, so it's easy to identify them later when the results come back
-        std::unordered_map<uint64_t,std::unordered_map<std::string,std::pair<uint64_t,query_id_t>>> batched_query_to_index_and_id;
-        std::shared_mutex map_mutex;
+        uint64_t batch_id = 0;
 
         inline void start(){
             running = true;
@@ -84,7 +78,7 @@ class VortexBenchmarkClient {
         std::mutex thread_mtx;
         std::condition_variable thread_signal;
 
-        std::queue<Blob> to_process;
+        std::queue<std::pair<std::shared_ptr<uint8_t>,uint64_t>> to_process;
         VortexBenchmarkClient* vortex;
 
         void main_loop();
@@ -105,12 +99,15 @@ class VortexBenchmarkClient {
     };
 
     ServiceClientAPI& capi = ServiceClientAPI::get_service_client();
-    uint64_t my_id = capi.get_my_id();
+    uint32_t my_id = capi.get_my_id();
     ClientThread *client_thread;
     std::deque<NotificationThread> notification_threads;
     uint64_t emb_dim = 1024;
     uint64_t num_result_threads = 1;
     uint64_t next_thread = 0;
+
+    std::unordered_map<query_id_t,std::chrono::steady_clock::time_point> query_send_time;
+    std::unordered_map<query_id_t,std::chrono::steady_clock::time_point> query_result_time;
 
     std::mutex query_id_mtx;
     uint64_t query_count = 0;
@@ -118,8 +115,8 @@ class VortexBenchmarkClient {
 
     std::atomic<uint64_t> result_count = 0;
     std::shared_mutex result_mutex;
-    std::unordered_map<query_id_t,std::vector<std::string>> result;
-    void result_received(nlohmann::json &result_json);
+    std::unordered_map<query_id_t,std::shared_ptr<VortexANNResult>> result;
+    void ann_result_received(std::shared_ptr<VortexANNResult> result);
 
     public:
 
@@ -128,9 +125,9 @@ class VortexBenchmarkClient {
     
     void setup(uint64_t batch_min_size,uint64_t batch_max_size,uint64_t batch_time_us,uint64_t emb_dim,uint64_t num_result_threads);
    
-    uint64_t query(const std::string& query,const float* query_emb);
+    uint64_t query(std::shared_ptr<std::string> query,std::shared_ptr<float> query_emb);
     void wait_results();
-    const std::vector<std::string>& get_result(query_id_t query_id);
+    std::shared_ptr<VortexANNResult> get_result(query_id_t query_id);
     void dump_timestamps(bool dump_remote = true);
 };
 

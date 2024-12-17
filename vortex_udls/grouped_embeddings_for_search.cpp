@@ -5,20 +5,7 @@
 namespace derecho{
 namespace cascade{
 
-
-queryQueue::queryQueue(int emb_dim): emb_dim(emb_dim) {
-    query_list.reserve(INITIAL_QUEUE_CAPACITY);
-    query_keys.reserve(INITIAL_QUEUE_CAPACITY);
-    query_embs_capacity = INITIAL_QUEUE_CAPACITY;
-    query_embs = aligned_alloc(query_embs_capacity * emb_dim * sizeof(float));
-    added_query_offset = 0;
-}
-
-queryQueue::~queryQueue() {
-    delete[] query_embs;
-}
-
-float* queryQueue::aligned_alloc(size_t size) {
+inline float* aligned_alloc(size_t size) {
     void* ptr = nullptr;
     if (posix_memalign(&ptr, CACHE_LINE_SIZE, size) != 0) {
         throw std::bad_alloc();
@@ -26,6 +13,83 @@ float* queryQueue::aligned_alloc(size_t size) {
     return static_cast<float*>(ptr);
 }
 
+PendingEmbeddingQueryBatch::PendingEmbeddingQueryBatch(uint64_t emb_dim,uint64_t max_size){
+    this->emb_dim = emb_dim;
+    queries.reserve(max_size);
+    embeddings = aligned_alloc(max_size * emb_dim * sizeof(float));
+    max_queries = max_size;
+    num_queries = 0;
+}
+
+PendingEmbeddingQueryBatch::~PendingEmbeddingQueryBatch() {
+    delete[] embeddings;
+}
+
+const float * PendingEmbeddingQueryBatch::get_embeddings(){
+    return embeddings;
+}
+
+const std::vector<std::shared_ptr<EmbeddingQuery>>& PendingEmbeddingQueryBatch::get_queries(){
+    return queries;
+}
+
+uint64_t PendingEmbeddingQueryBatch::capacity(){
+    return max_queries;
+}
+
+uint64_t PendingEmbeddingQueryBatch::size(){
+    return num_queries;
+}
+
+uint64_t PendingEmbeddingQueryBatch::space_left(){
+    return max_queries - num_queries;
+}
+
+bool PendingEmbeddingQueryBatch::empty(){
+    return num_queries == 0;
+}
+
+void PendingEmbeddingQueryBatch::reset(){
+    queries.clear();
+    num_queries = 0;
+}
+
+uint64_t PendingEmbeddingQueryBatch::add_queries(const std::vector<std::shared_ptr<EmbeddingQuery>>& queries_to_add,
+        uint64_t query_start_index,
+        uint64_t num_to_add,
+        const uint8_t *buffer,
+        uint32_t embeddings_position,
+        uint32_t embeddings_size){
+    if(num_to_add > space_left()){
+        std::cerr << "Trying to add more queries than the capacity of the buffer" << std::endl;
+        return 0;
+    }
+
+    // copy embeddings buffer
+    uint64_t start_pos = num_queries * emb_dim * sizeof(float);
+    std::memcpy(reinterpret_cast<uint8_t*>(embeddings)+start_pos,buffer+embeddings_position,embeddings_size);
+    
+    // copy queries
+    for(uint64_t i=0;i<num_to_add;i++){ 
+        uint64_t idx = query_start_index + i;
+        queries.push_back(queries_to_add[idx]);
+        num_queries++;
+    }
+
+    return num_to_add;
+}
+
+
+
+
+
+
+
+
+
+
+
+/*
 void queryQueue::resize_queue(size_t new_query_capacity) {
     size_t new_capacity_in_elements = new_query_capacity * emb_dim;
     float* new_embs = aligned_alloc(new_capacity_in_elements * sizeof(float));
@@ -67,7 +131,7 @@ void queryQueue::reset() {
     query_keys.clear();
     added_query_offset = 0;
 }
-
+*/
 
 float* GroupedEmbeddingsForSearch::single_emb_object_retrieve(int& retrieved_num_embs,
                                         std::string& cluster_emb_key,
@@ -184,7 +248,7 @@ int GroupedEmbeddingsForSearch::initialize_groupped_embeddings_for_search(){
      return 0;
 }
 
-void GroupedEmbeddingsForSearch::search(int nq, float* xq, int top_k, float* D, long* I){
+void GroupedEmbeddingsForSearch::search(int nq, const float* xq, int top_k, float* D, long* I){
      switch (this->search_type) {
      case SearchType::FaissCpuFlatSearch:
           faiss_cpu_flat_search(nq, xq, top_k, D, I);
@@ -214,7 +278,7 @@ void GroupedEmbeddingsForSearch::initialize_cpu_hnsw_search() {
      }
 }
 
-int GroupedEmbeddingsForSearch::hnsw_cpu_search(int nq, float* xq, int top_k, float* D, long* I)  {
+int GroupedEmbeddingsForSearch::hnsw_cpu_search(int nq, const float* xq, int top_k, float* D, long* I)  {
      for(size_t i = 0; i < nq; i++) {
           const float* query_vector = xq + (i * this->emb_dim);
 
@@ -241,7 +305,7 @@ void GroupedEmbeddingsForSearch::initialize_cpu_flat_search(){
 }
 
 
-int GroupedEmbeddingsForSearch::faiss_cpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
+int GroupedEmbeddingsForSearch::faiss_cpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I){
      dbg_default_trace("FAISS CPU flat Search in [GroupedEmbeddingsForSearch] class");
      this->cpu_flatl2_index->search(nq, xq, top_k, D, I);
      return 0;
@@ -254,7 +318,7 @@ void GroupedEmbeddingsForSearch::initialize_gpu_flat_search(){
 }
 
 
-int GroupedEmbeddingsForSearch::faiss_gpu_flat_search(int nq, float* xq, int top_k, float* D, long* I){
+int GroupedEmbeddingsForSearch::faiss_gpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I){
      dbg_default_trace("FAISS GPU flatl2 Search in [GroupedEmbeddingsForSearch] class" );
      this->gpu_flatl2_index->search(nq, xq, top_k, D, I);
      return 0;
@@ -269,7 +333,7 @@ void GroupedEmbeddingsForSearch::initialize_gpu_ivf_flat_search(){
 }
 
 
-int GroupedEmbeddingsForSearch::faiss_gpu_ivf_flat_search(int nq, float* xq, int top_k, float* D, long* I){
+int GroupedEmbeddingsForSearch::faiss_gpu_ivf_flat_search(int nq, const float* xq, int top_k, float* D, long* I){
      dbg_default_trace("FAISS GPU ivf Search in [GroupedEmbeddingsForSearch] class" );
      this->gpu_ivf_flatl2_index->search(nq, xq, top_k, D, I);
      return 0;

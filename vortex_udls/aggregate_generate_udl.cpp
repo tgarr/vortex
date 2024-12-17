@@ -3,36 +3,7 @@
 namespace derecho {
 namespace cascade {
 
-
-QuerySearchResults::QuerySearchResults(const int& client_id, const int query_batch_id,
-                    const std::string& query_text, const int& total_cluster_num, const int& top_k) 
-    : client_id(client_id), query_batch_id(query_batch_id), query_text(query_text), 
-        total_cluster_num(total_cluster_num), top_k(top_k) {}
-
-bool QuerySearchResults::clusters_results_all_received() {
-    if(static_cast<int>(collected_cluster_ids.size()) == total_cluster_num){
-        return true;
-    }
-    return false;
-}
-
-void QuerySearchResults::add_cluster_result(int cluster_id, std::vector<DocIndex> cluster_results) {
-    if(std::find(collected_cluster_ids.begin(), collected_cluster_ids.end(), cluster_id) != collected_cluster_ids.end()){
-        dbg_default_warn("AggGenOCDPO, receiving repeated cluster's result, from cluster{}",cluster_id);
-        return;
-    }
-    this->collected_cluster_ids.push_back(cluster_id);
-    // Add the cluster_results to the min_heap, and keep the size of the heap to be top_k
-    for (const auto& doc_index : cluster_results) {
-        if (static_cast<int>(agg_top_k_results.size()) < top_k) {
-            agg_top_k_results.push(doc_index);
-        } else if (doc_index < agg_top_k_results.top()) {
-            agg_top_k_results.pop();
-            agg_top_k_results.push(doc_index);
-        }
-    }
-}
-
+// ProcessThread
 
 AggGenOCDPO::ProcessThread::ProcessThread(uint64_t thread_id, AggGenOCDPO* parent_udl)
     : my_thread_id(thread_id), parent(parent_udl), running(false) {}
@@ -53,182 +24,235 @@ void AggGenOCDPO::ProcessThread::signal_stop() {
     thread_signal.notify_all(); 
 }
 
-void AggGenOCDPO::ProcessThread::push_task(std::unique_ptr<queuedTask> task) {
+void AggGenOCDPO::ProcessThread::push_result(std::shared_ptr<ClusterSearchResult> result) {
     std::lock_guard<std::mutex> lock(thread_mtx);
-    pending_tasks.push(std::move(task));
+    pending_results.push(result);
     thread_signal.notify_all();
 }
 
-void AggGenOCDPO::ProcessThread::notify_client(DefaultCascadeContextType* typed_ctxt, 
-                                                std::string& result_json_str,
-                                                const int& client_id) {
-    
-    Blob result_blob(reinterpret_cast<const uint8_t*>(result_json_str.c_str()), result_json_str.size());
-    try {
-        std::string notification_pathname = "/rag/results/" + std::to_string(client_id);
-        typed_ctxt->get_service_client_ref().notify(result_blob,notification_pathname,client_id);
-        dbg_default_trace("[AggregateGenUDL] echo back to node {}", client_id);
-    } catch (derecho::derecho_exception& ex) {
-        std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
-        dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());
-    }
-}
-
-std::string AggGenOCDPO::ProcessThread::serialize_results(const int& client_id,
-                                                        const std::vector<int>& result_ids, 
-                                                        size_t start, size_t end){
-    std::string result_json_str;
-    // convert the query and top_k_docs to a json object
-    nlohmann::json result_json = json::array();
-    for (size_t i = start; i <= end; i++) {
-        auto& query_result = this->query_results[client_id][result_ids[i]];
-        const int& query_batch_id = query_result->query_batch_id;
-        nlohmann::json result;
-        result["query"] = query_result->query_text;
-        result["top_k_docs"] = query_result->top_k_docs;
-        result["query_batch_id"] = query_batch_id; // logging purpose
-        result_json.push_back(result);
-
-        int qid = query_result->query_batch_id % QUERY_BATCH_ID_MODULUS;
-        TimestampLogger::log(LOG_TAG_AGG_UDL_PUT_RESULT_START, client_id, query_batch_id, qid);
-    }
-    result_json_str = result_json.dump(); 
-    return result_json_str; // RVO
-}
-
-void AggGenOCDPO::ProcessThread::garbage_collect_query_results(std::map<int, std::vector<int>>& notified_results) {
-    for (auto& client_results : notified_results) {
-        for (auto& query_batch_id : client_results.second) {
-            query_results[client_results.first].erase(query_batch_id);
-        }
-    }
-}
-
-
-void AggGenOCDPO::ProcessThread::notify_clients_in_batch(DefaultCascadeContextType* typed_ctxt, 
-                        std::map<int, std::vector<int>>& results_to_notify){
-    for (const auto& [client_id, client_results] : results_to_notify) {
-        size_t total_num_replies = client_results.size();
-        size_t start_index = 0;
-        size_t end_index;
-        while (start_index < total_num_replies) {
-            end_index = std::min(start_index + MAX_NUM_REPLIES_PER_NOTIFICATION_MESSAGE, total_num_replies) - 1;
-            std::string result_json_str = serialize_results(client_id, client_results, start_index, end_index);
-            notify_client(typed_ctxt, result_json_str, client_id);
-            start_index = end_index + 1;
-        }
-    }
-    // garbage collect the query_results
-    garbage_collect_query_results(results_to_notify);
-}
-
-bool AggGenOCDPO::ProcessThread::get_topk_docs(DefaultCascadeContextType* typed_ctxt, 
-                                            const int& client_id, const int& query_batch_id){
-    auto& agg_top_k_results = this->query_results[client_id][query_batch_id]->agg_top_k_results;
-    auto& top_k_docs = this->query_results[client_id][query_batch_id]->top_k_docs;
-    top_k_docs.resize(agg_top_k_results.size());
-    int i = agg_top_k_results.size();
-    while (!agg_top_k_results.empty()) {
-        i--;
-        auto doc_index = agg_top_k_results.top();
-        agg_top_k_results.pop();
-        std::string res_doc;
-        bool find_doc = parent->get_doc(typed_ctxt,doc_index.cluster_id, doc_index.emb_id, res_doc);
-        if (!find_doc) {
-            dbg_default_error("Failed to get_doc for cluster_id={} and emb_id={}.", doc_index.cluster_id, doc_index.emb_id);
-            return false;
-        }
-        top_k_docs[i] = std::move(res_doc);
-    }
-    return true;
-}
-
-void AggGenOCDPO::ProcessThread::add_to_query_results(queuedTask* task_ptr) {
-    if (query_results.find(task_ptr->client_id) == query_results.end()) {
-        query_results[task_ptr->client_id] = std::unordered_map<int, std::unique_ptr<QuerySearchResults>>();
-    }
-    if (query_results[task_ptr->client_id].find(task_ptr->query_batch_id) == query_results[task_ptr->client_id].end()) {
-        query_results[task_ptr->client_id][task_ptr->query_batch_id] = std::make_unique<QuerySearchResults>(
-                                                                    task_ptr->client_id, task_ptr->query_batch_id,
-                                                                    task_ptr->query_text, parent->top_num_centroids, parent->top_k);
-    }
-    query_results[task_ptr->client_id][task_ptr->query_batch_id]->add_cluster_result(task_ptr->cluster_id, task_ptr->cluster_results);
-}
-
-
-bool AggGenOCDPO::ProcessThread::process_task(DefaultCascadeContextType* typed_ctxt, queuedTask* task_ptr){
-    // 1. add the cluster_results to the query_results and check if all results are collected
-    add_to_query_results(task_ptr);
-    // 2. check if all cluster results are collected for this query
-    if (!query_results[task_ptr->client_id][task_ptr->query_batch_id]->clusters_results_all_received()) {
-        TimestampLogger::log(LOG_TAG_AGG_UDL_END_NOT_FULLY_GATHERED, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->cluster_id);
-        return false;
-    }
-    TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_START, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->cluster_id);
-    // 3. All cluster results are collected. Retrieve the top_k docs contents
-    bool get_top_k_docs_success = this->get_topk_docs(typed_ctxt, task_ptr->client_id, task_ptr->query_batch_id);
-    if (!get_top_k_docs_success) {
-        dbg_default_error("Failed to get top_k_docs for query_text={}.", task_ptr->query_text);
-        return false;
-    }
-    TimestampLogger::log(LOG_TAG_AGG_UDL_RETRIEVE_DOC_END, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->qid);
-    return true;
-}
-
-void AggGenOCDPO::ProcessThread::process_tasks(DefaultCascadeContextType* typed_ctxt, 
-                                            std::vector<std::unique_ptr<queuedTask>>& tasks,
-                                            std::map<int, std::vector<int>>& results_to_notify){
-    for (auto& task_ptr : tasks) {
-        bool collected_all_results = process_task(typed_ctxt, task_ptr.get());
-        if (collected_all_results) {
-            results_to_notify[task_ptr->client_id].push_back(task_ptr->query_batch_id);
-        }
-    }
-}
-
 void AggGenOCDPO::ProcessThread::main_loop(DefaultCascadeContextType* typed_ctxt) {
-    auto batch_time = std::chrono::microseconds(parent->batch_time_us);
-    auto wait_start = std::chrono::steady_clock::now();
-    std::vector<std::unique_ptr<queuedTask>> tasks;
-    tasks.reserve(parent->max_batch_size);
-
     while (running) {
         std::unique_lock<std::mutex> lock(thread_mtx);
-        if (this->pending_tasks.size() < parent->min_batch_size ){
-            thread_signal.wait_for(lock, batch_time);
+        if (this->pending_results.empty()){
+            thread_signal.wait(lock);
         }
-        if (!running)
-            break;
-        auto now = std::chrono::steady_clock::now();
-        auto pending_count = this->pending_tasks.size();
-        auto current_batch_count = 0;
-        // move out the pending tasks in batch to be processed
-        if (pending_count >= parent->min_batch_size || (now - wait_start) >= batch_time) {
-            current_batch_count = std::min(pending_count, static_cast<size_t>(parent->max_batch_size));
-            wait_start = now;
-            while (!this->pending_tasks.empty() && tasks.size() < current_batch_count) {
-                tasks.push_back(std::move(this->pending_tasks.front()));
-                this->pending_tasks.pop();
-            }
-        }
+
+        if (!running) break;
+
+        if(this->pending_results.empty()) continue;
+
+        std::shared_ptr<ClusterSearchResult> result = this->pending_results.front();
+        this->pending_results.pop();
+
         lock.unlock();
 
-        // process pending tasks in batch
-        std::map<int, std::vector<int>> results_to_notify;
-        if (current_batch_count != 0) {
-            process_tasks(typed_ctxt, tasks, results_to_notify);
-            tasks.clear();
-        }
-        // batch the queries for each client to send notifications
-        notify_clients_in_batch(typed_ctxt, results_to_notify);
+        // process pending result
+        process_result(result);
     }
 }
 
+void AggGenOCDPO::ProcessThread::process_result(std::shared_ptr<ClusterSearchResult> result){
+    // add results together with results received before
+    query_id_t query_id = result->get_query_id();
+    if(results_aggregate.count(query_id) == 0){
+        results_aggregate[query_id] = std::make_unique<ClusterSearchResultsAggregate>(result,parent->top_num_centroids, parent->top_k,&parent->cluster_doc_table);
+    } else {
+        results_aggregate[query_id]->add_result(result);
+    }
 
-bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int cluster_id) {
-    if (doc_tables.find(cluster_id) != doc_tables.end()) {
+    // in case all results were received, send it to the batching thread so the client can be notified
+    if(results_aggregate[query_id]->all_results_received()){
+        parent->batch_thread->push_aggregate_results(std::move(results_aggregate[query_id]));
+        results_aggregate.erase(query_id);
+    }
+}
+
+// BatchingThread
+
+AggGenOCDPO::BatchingThread::BatchingThread(uint64_t thread_id, AggGenOCDPO* parent_udl)
+    : my_thread_id(thread_id), parent(parent_udl), running(false) {}
+
+void AggGenOCDPO::BatchingThread::start(DefaultCascadeContextType* typed_ctxt) {
+    running = true;
+    real_thread = std::thread(&BatchingThread::main_loop, this, typed_ctxt);
+}
+
+void AggGenOCDPO::BatchingThread::join() {
+    if (real_thread.joinable()) {
+        real_thread.join();
+    }
+}
+
+void AggGenOCDPO::BatchingThread::signal_stop() {
+    std::lock_guard<std::mutex> lock(client_queue_mutex);
+    running = false;
+    client_queue_cv.notify_all();
+}
+
+void AggGenOCDPO::BatchingThread::push_aggregate_results(std::unique_ptr<ClusterSearchResultsAggregate> aggregate){
+    uint32_t client_id = aggregate->get_client_id();
+    std::unique_lock<std::mutex> lock(client_queue_mutex);
+
+    if(client_queue.count(client_id) == 0){
+        client_queue[client_id] = std::make_unique<std::vector<std::unique_ptr<ClusterSearchResultsAggregate>>>();
+        client_queue[client_id]->reserve(parent->max_batch_size);
+    }
+
+    client_queue[client_id]->push_back(std::move(aggregate));
+
+    client_queue_cv.notify_all();
+}
+
+void AggGenOCDPO::BatchingThread::main_loop(DefaultCascadeContextType* typed_ctxt) {
+    // TODO timestamp logging in this method should be revisited
+
+    std::unique_lock<std::mutex> lock(client_queue_mutex, std::defer_lock);
+    std::unordered_map<uint32_t,std::chrono::steady_clock::time_point> wait_time;
+    auto batch_time = std::chrono::microseconds(parent->batch_time_us);
+    while (running) {
+        lock.lock();
+        bool empty = true;
+        for(auto& item : client_queue){
+            if(!(item.second->empty())){
+                empty = false;
+                break;
+            }
+        }
+
+        if(empty){
+            client_queue_cv.wait_for(lock,batch_time);
+        }
+
+        if (!running) break;
+
+        // move queue pointers out of the map and replace with empty vectors
+        std::unordered_map<uint32_t,std::unique_ptr<std::vector<std::unique_ptr<ClusterSearchResultsAggregate>>>> to_send;
+        auto now = std::chrono::steady_clock::now();
+        for(auto& item : client_queue){
+            if(wait_time.count(item.first) == 0){
+                wait_time[item.first] = now;
+            }
+
+            if((item.second->size() >= parent->min_batch_size) || ((now-wait_time[item.first]) >= batch_time)){
+                to_send[item.first] = std::move(item.second);
+                item.second = std::make_unique<std::vector<std::unique_ptr<ClusterSearchResultsAggregate>>>();
+                item.second->reserve(parent->max_batch_size);
+            }
+        }
+
+        lock.unlock();
+
+        // serialize and send batches
+        for(auto& item : to_send){
+            uint64_t num_sent = 0;
+            uint64_t total = item.second->size();
+
+            // send in batches of maximum max_batch_size queries
+            while(num_sent < total){
+                uint64_t left = total - num_sent;
+                uint64_t batch_size = std::min(static_cast<uint64_t>(parent->max_batch_size),left);
+
+                ClientNotificationBatcher batcher(parent->top_k,batch_size,false);
+                for(uint64_t i=num_sent;i<(num_sent+batch_size);i++){
+                    batcher.add_aggregate(std::move(item.second->at(i)));
+                }
+                batcher.serialize();
+
+                // notify client
+                try {
+                    std::string notification_pathname = "/rag/results/" + std::to_string(item.first);
+                    typed_ctxt->get_service_client_ref().notify(*(batcher.get_blob()),notification_pathname,item.first);
+                    dbg_default_trace("[AggregateGenUDL] echo back to node {}", item.first);
+                } catch (derecho::derecho_exception& ex) {
+                    std::cerr << "[AGGnotification ocdpo]: exception on notification:" << ex.what() << std::endl;
+                    dbg_default_error("[AGGnotification ocdpo]: exception on notification:{}", ex.what());
+                }
+
+                num_sent += batch_size;
+            }
+        }
+    }
+}
+
+void AggGenOCDPO::ocdpo_handler(const node_id_t sender, 
+                                const std::string& object_pool_pathname, 
+                                const std::string& key_string, 
+                                const ObjectWithStringKey& object, 
+                                const emit_func_t& emit, 
+                                DefaultCascadeContextType* typed_ctxt, 
+                                uint32_t worker_id) {
+
+    uint64_t cluster_id = parse_cluster_id_udl3(key_string);
+    if(cluster_doc_table.count(cluster_id) == 0){
+        if(!load_doc_table(typed_ctxt,cluster_id)){
+            std::cerr << "Error: doc table could not be loaded for cluster " << cluster_id << std::endl;
+            dbg_default_error("doc table could not be loaded at AggGenOCDPO");
+            return;
+        }
+    }
+
+    TimestampLogger::log(LOG_TAG_AGG_UDL_START,my_id,0,sender); // TODO revise
+    
+    std::unique_ptr<ClusterSearchResultBatchManager> batch_manager = std::make_unique<ClusterSearchResultBatchManager>(object.blob.bytes,object.blob.size,cluster_id);
+    
+    TimestampLogger::log(LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE, my_id, 0, sender); // TODO revise
+   
+    for(auto& result : batch_manager->get_results()){ 
+        query_id_t query_id = result->get_query_id();
+        uint64_t to_thread = query_id % num_threads;
+        process_threads[to_thread]->push_result(result);
+    }
+
+    // TODO: add a logger here after push?
+}
+
+void AggGenOCDPO::start_threads(DefaultCascadeContextType* typed_ctxt) {
+    this->batch_thread = std::make_unique<BatchingThread>(this->my_id, this);
+    this->batch_thread->start(typed_ctxt);
+
+    for (int thread_id = 0; thread_id < this->num_threads; thread_id++) {
+        process_threads.emplace_back(std::make_unique<ProcessThread>(static_cast<uint64_t>(thread_id), this));
+    }
+    for (auto& process_thread : process_threads) {
+        process_thread->start(typed_ctxt);
+    }
+}
+
+void AggGenOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, const nlohmann::json& config) {
+    this->my_id = typed_ctxt->get_service_client_ref().get_my_id();
+    try{
+        if (config.contains("top_num_centroids")) this->top_num_centroids = config["top_num_centroids"].get<int>();
+        if (config.contains("final_top_k")) this->top_k = config["final_top_k"].get<int>();
+        if (config.contains("batch_time_us")) this->batch_time_us = config["batch_time_us"].get<int>();
+        if (config.contains("min_batch_size")) this->min_batch_size = config["min_batch_size"].get<int>();
+        if (config.contains("max_batch_size")) this->max_batch_size = config["max_batch_size"].get<int>();
+        if (config.contains("num_threads")) this->num_threads = config["num_threads"].get<int>();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config" << std::endl;
+        dbg_default_error("Failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config, at clusters_search_udl.");
+    } 
+    this->start_threads(typed_ctxt);
+}  
+
+void AggGenOCDPO::shutdown() {
+    for (auto& process_thread : process_threads) {
+        if (process_thread) {
+            process_thread->signal_stop();
+            process_thread->join();
+        }
+    }
+
+    if (batch_thread) {
+        batch_thread->signal_stop();
+        batch_thread->join();
+    }
+}
+
+bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, uint64_t cluster_id) {
+    if (cluster_doc_table.count(cluster_id) > 0){
         return true;
     }
+
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_EMB_DOC_MAP_START, my_id, 0, cluster_id);
     // check the keys for this grouped embedding objects stored in cascade
     //    because of the message size, the map for one cluster may split into multiple chunks stored in Cascade
@@ -242,6 +266,7 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
         dbg_default_error("[{}]at {}, Failed to find object prefix {} in the KV store.", gettid(), __func__, table_prefix);
         return -1;
     }
+
     std::priority_queue<std::string, std::vector<std::string>, CompareObjKey> filtered_keys = filter_exact_matched_keys(map_obj_keys, table_prefix);
     // get the doc table objects and save to local cache
     while(!filtered_keys.empty()){
@@ -259,7 +284,7 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
         try{
             nlohmann::json doc_table_json = nlohmann::json::parse(json_str);
             for (const auto& [emb_index, pathname] : doc_table_json.items()) {
-                this->doc_tables[cluster_id][std::stol(emb_index)] = "/rag/doc/" + std::to_string(pathname.get<int>());
+                this->cluster_doc_table[cluster_id][std::stol(emb_index)] = pathname.get<long>();
             }
         } catch (const nlohmann::json::parse_error& e) {
             std::cerr << "Error: load_doc_table JSON parse error: " << e.what() << std::endl;
@@ -271,6 +296,9 @@ bool AggGenOCDPO::load_doc_table(DefaultCascadeContextType* typed_ctxt, int clus
     return true;
 }
 
+/* 
+ * The code below should be moved to the new UDL4, which will be responsible for getting the documents and calling/running the LLM
+ *
 bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id, long emb_index, std::string& res_doc) {
     std::shared_lock<std::shared_mutex> read_lock(doc_cache_mutex);
     if (doc_contents.find(cluster_id) != doc_contents.end()) {
@@ -313,70 +341,7 @@ bool AggGenOCDPO::get_doc(DefaultCascadeContextType* typed_ctxt, int cluster_id,
     TimestampLogger::log(LOG_TAG_AGG_UDL_LOAD_DOC_END, this->my_id, emb_index, cluster_id);
     return true;
 }
-
-
-void AggGenOCDPO::ocdpo_handler(const node_id_t sender, 
-                                const std::string& object_pool_pathname, 
-                                const std::string& key_string, 
-                                const ObjectWithStringKey& object, 
-                                const emit_func_t& emit, 
-                                DefaultCascadeContextType* typed_ctxt, 
-                                uint32_t worker_id) {
-    // 1. parse the query information from the key_string
-    std::unique_ptr<queuedTask> task_ptr = std::make_unique<queuedTask>();
-    if (!parse_query_info(key_string, task_ptr->client_id, task_ptr->batch_id, task_ptr->cluster_id, task_ptr->qid)) {
-        std::cerr << "Error: failed to parse the query_info from the key_string:" << key_string << std::endl;
-        dbg_default_error("In {}, Failed to parse the query_info from the key_string:{}.", __func__, key_string);
-        return;
-    }
-    task_ptr->query_batch_id = task_ptr->batch_id * QUERY_BATCH_ID_MODULUS + task_ptr->qid % QUERY_BATCH_ID_MODULUS; // cast down qid for logging purpose
-    TimestampLogger::log(LOG_TAG_AGG_UDL_START,task_ptr->client_id,task_ptr->query_batch_id,task_ptr->cluster_id);
-    dbg_default_trace("[AggregateGenUDL] receive cluster search result from cluster{}.", task_ptr->cluster_id);
-    // 2. deserialize the cluster searched result from the object
-    try{
-        deserialize_cluster_search_result_from_bytes(task_ptr->cluster_id, object.blob.bytes, object.blob.size, task_ptr->query_text, task_ptr->cluster_results);
-    } catch (const std::exception& e) {
-        std::cerr << "Error: failed to deserialize the cluster searched result and query texts from the object." << std::endl;
-        dbg_default_error("{}, Failed to deserialize the cluster searched result from the object.", __func__);
-        return;
-    }
-    TimestampLogger::log(LOG_TAG_AGG_UDL_FINISHED_DESERIALIZE, task_ptr->client_id, task_ptr->query_batch_id, task_ptr->cluster_id);
-    // if multithread, could allocate based on qid(the hashing of query_text from UDL2) % num_threads
-    process_thread->push_task(std::move(task_ptr));
-    // TODO: add a logger here after push?
-}
-
-void AggGenOCDPO::start_threads(DefaultCascadeContextType* typed_ctxt) {
-    uint64_t thread_id = 0;
-    /*** Note: current implementation only have one thread to proces queue,
-     *   Could add more thread to process tasks, 
-     *   but need to make sure the same query_text is processed by the same thread  
-     */
-    process_thread = std::make_unique<ProcessThread>(thread_id, this);
-    process_thread->start(typed_ctxt);
-}
-
-void AggGenOCDPO::set_config(DefaultCascadeContextType* typed_ctxt, const nlohmann::json& config) {
-    this->my_id = typed_ctxt->get_service_client_ref().get_my_id();
-    try{
-        if (config.contains("top_num_centroids")) this->top_num_centroids = config["top_num_centroids"].get<int>();
-        if (config.contains("final_top_k")) this->top_k = config["final_top_k"].get<int>();
-        if (config.contains("retrieve_docs")) this->retrieve_docs = config["retrieve_docs"].get<bool>();
-        if (config.contains("batch_time_us")) this->batch_time_us = config["batch_time_us"].get<int>();
-        if (config.contains("min_batch_size")) this->min_batch_size = config["min_batch_size"].get<int>();
-        if (config.contains("max_batch_size")) this->max_batch_size = config["max_batch_size"].get<int>();
-    } catch (const std::exception& e) {
-        std::cerr << "Error: failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config" << std::endl;
-        dbg_default_error("Failed to convert top_num_centroids, top_k, include_llm, or retrieve_docs from config, at clusters_search_udl.");
-    } 
-    this->start_threads(typed_ctxt);
-}  
-
-void AggGenOCDPO::shutdown() {
-    process_thread->signal_stop();
-    process_thread->join();
-}
-
+*/
 
 }  // namespace cascade
 }  // namespace derecho

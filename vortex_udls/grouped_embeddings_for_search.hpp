@@ -27,27 +27,36 @@ namespace derecho{
 namespace cascade{
 
 constexpr size_t CACHE_LINE_SIZE = 64;
-constexpr size_t INITIAL_QUEUE_CAPACITY = 1024;
 
-/*** Class to buffer the receiving queries
+/*
+ * This class is responsible for holding a batch of queries to be processed in a memory-efficient way.
  */
-struct queryQueue{
-    std::vector<std::string> query_list;
-    std::vector<std::string> query_keys;
-    float* query_embs;
-    size_t query_embs_capacity; 
-    std::atomic<size_t> added_query_offset;
-    int emb_dim;
+class PendingEmbeddingQueryBatch {
+    uint64_t emb_dim;
+    float* embeddings;
+    uint64_t max_queries = 0;
+    uint64_t num_queries = 0;
+    std::vector<std::shared_ptr<EmbeddingQuery>> queries;
 
-    queryQueue(int emb_dim);
-    ~queryQueue();
-    float* aligned_alloc(size_t size);
-    void resize_queue(size_t new_capacity);
-    bool add_queries(std::vector<std::string>&& queries, const std::string& key, float* embs, int emb_dim, int num_queries);
-    int count_queries();
+public:
+    PendingEmbeddingQueryBatch(uint64_t emb_dim,uint64_t max_size);
+    ~PendingEmbeddingQueryBatch();
+    
+    uint64_t add_queries(const std::vector<std::shared_ptr<EmbeddingQuery>>& queries,
+        uint64_t query_start_index,
+        uint64_t num_to_add,
+        const uint8_t *buffer,
+        uint32_t embeddings_position,
+        uint32_t embeddings_size);
+
+    const float * get_embeddings();
+    const std::vector<std::shared_ptr<EmbeddingQuery>>& get_queries();
+    uint64_t capacity();
+    uint64_t size();
+    uint64_t space_left();
+    bool empty();
     void reset();
 };
-
 
 /*** Wrapper for the ANN search engine
  * Store group of embeddings for a cluster or for centroids;
@@ -149,11 +158,11 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
       */
-     void search(int nq, float* xq, int top_k, float* D, long* I);
+     void search(int nq, const float* xq, int top_k, float* D, long* I);
 
      void initialize_cpu_hnsw_search();
 
-     int hnsw_cpu_search(int nq, float* xq, int top_k, float* D, long* I);
+     int hnsw_cpu_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /*** 
       * Initialize the CPU flat search index based on the embeddings.
@@ -170,7 +179,7 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
      ***/
-     int faiss_cpu_flat_search(int nq, float* xq, int top_k, float* D, long* I);
+     int faiss_cpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /*** 
       * Initialize the GPU flat search index based on the embeddings.
@@ -187,7 +196,7 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
      ***/
-     int faiss_gpu_flat_search(int nq, float* xq, int top_k, float* D, long* I);
+     int faiss_gpu_flat_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /*** 
       * Initialize the GPU ivf search index based on the embeddings.
@@ -204,7 +213,7 @@ public:
       * @param D: distance array to store the distance of the top_k embeddings
       * @param I: index array to store the index of the top_k embeddings
      ***/
-     int faiss_gpu_ivf_flat_search(int nq, float* xq, int top_k, float* D, long* I);
+     int faiss_gpu_ivf_flat_search(int nq, const float* xq, int top_k, float* D, long* I);
 
      /***
       * Reset the GroupedEmbeddingsForSearch object

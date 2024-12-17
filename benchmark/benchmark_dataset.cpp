@@ -15,11 +15,11 @@ uint64_t VortexBenchmarkDataset::get_next_query_index(){
     return query_index;
 }
 
-const std::string& VortexBenchmarkDataset::get_query(uint64_t query_index){
+std::shared_ptr<std::string> VortexBenchmarkDataset::get_query(uint64_t query_index){
     return queries[query_index % queries.size()];
 }
 
-const float* VortexBenchmarkDataset::get_embeddings(uint64_t query_index){
+std::shared_ptr<float> VortexBenchmarkDataset::get_embeddings(uint64_t query_index){
     return query_embs[query_index % query_embs.size()];
 }
 
@@ -37,12 +37,13 @@ void VortexBenchmarkDataset::read_queries(uint64_t num_queries){
         return;
     }
 
-    std::string line;
-    while (std::getline(file, line)) {
+    std::shared_ptr<std::string> line = std::make_shared<std::string>();
+    while (std::getline(file, *line)) {
         if(queries.size() >= num_queries){
             break;
         }
         queries.push_back(line);
+        line = std::make_shared<std::string>();
     }
 
     file.close();
@@ -79,7 +80,8 @@ void VortexBenchmarkDataset::read_query_embs(){
             return;
         }
 
-        query_embs.push_back(embs);
+        std::shared_ptr<float> ptr(embs);
+        query_embs.push_back(ptr);
     }
 
     file.close();

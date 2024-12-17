@@ -11,7 +11,6 @@
 #include <derecho/openssl/hash.hpp>
 
 #include "grouped_embeddings_for_search.hpp"
-#include "api_utils.hpp"
 
 
 namespace derecho{
@@ -22,7 +21,9 @@ namespace cascade{
 
 #define CLUSTER_EMB_OBJECTPOOL_PREFIX "/rag/emb/clusters/cluster"
 #define EMIT_AGGREGATE_PREFIX "/rag/generate/agg"
+#define AGGREGATE_SUBGROUP_INDEX 2
 
+#define INITIAL_PENDING_BATCHES 10
 
 std::string get_uuid() {
     return MY_UUID;
@@ -32,15 +33,10 @@ std::string get_description() {
     return MY_DESC;
 }
 
-
-
-
 class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
-    
-
     /***
-     * A thread class to process ANN search on the queued queries in round-robin order on the local clusters
-     *   then emit the result to the next UDL
+     * A thread class to process ANN search on batches of queries in round-robin order. 
+     * Results are pushed to the batching thread queue to be sent to the next UDL.
      */
     class ClusterSearchWorker {
         uint64_t my_thread_id;
@@ -49,56 +45,48 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
         bool running = false;
         std::thread real_thread;
 
-        std::unique_ptr<queryQueue> query_buffer;
-        std::unique_ptr<queryQueue> shadow_query_buffer;
-        int use_shadow_flag;  // if this is 1, then add to shadow_query_buffer, otherwise add to query_buffer
-        std::condition_variable_any query_buffer_cv;
         std::mutex query_buffer_mutex;
-        
+        std::condition_variable_any query_buffer_cv;
+        std::vector<std::shared_ptr<PendingEmbeddingQueryBatch>> pending_batches;
+        int64_t current_batch = -1;
+        int64_t next_batch = 0;
+        int64_t next_to_process = 0;
 
-        /***
-        * Format the new_keys for the search results of the queries
-        * it is formated as client{client_id}qb{querybatch_id}qc{client_batch_query_count}_cluster{cluster_id}_qid{hash(query)}
-        * @param new_keys the new keys to be constructed
-        * @param key_string the key string of the object
-        * @param query_list a list of query strings
-        ***/
-        void construct_new_keys(std::vector<std::string>& new_keys,
-                                std::vector<std::string>::const_iterator keys_begin,
-                                std::vector<std::string>::const_iterator keys_end,
-                                std::vector<std::string>::const_iterator queries_begin,
-                                std::vector<std::string>::const_iterator queries_end);
-
-        // Helper function: Emit results to the next UDL
-        void emit_results(DefaultCascadeContextType* typed_ctxt,
-                        const std::vector<std::string>& new_keys,
-                        const std::vector<std::string>& query_list,
-                        long* I, float* D, size_t start_idx, size_t batch_size);
-        /***
-         * Run ANN algorithm on batch of queries from query_buffer and emit the results once the whole batch finishes
-         *  used for batchable search, which is more performant when the number of queries is large
-        */
-        void run_cluster_search_and_emit(DefaultCascadeContextType* typed_ctxt,
-                                        queryQueue* query_buffer);
-        
-        /*** Helper function to check if there are enough pending queries on
-         *   the buffer that have been added by the push_thread
-         *   If so, then flip the flag to have the push_thread to start a new buffer, 
-         *   while this thread process the queued queries
-         *   @param num the number of queries to check if enough pending
-         *   @return true if the accumulated queries > min_batch_size
-         */
-        bool enough_pending_queries(int num);
+        std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> process_batch(std::shared_ptr<PendingEmbeddingQueryBatch> batch);
 
     public:
         ClusterSearchWorker(uint64_t thread_id, 
                             ClustersSearchOCDPO* parent_udl);
         void main_loop(DefaultCascadeContextType* typed_ctxt);   
-        void push_to_query_buffer(int cluster_id, const Blob& blob, const std::string& key);
-        // void push_queries_to_cluster(int cluster_id, std::vector<std::string>& query_list, std::vector<std::string>& query_keys);     
+        void push_queries(uint64_t cluster_id, std::unique_ptr<EmbeddingQueryBatchManager> batch_manager, const uint8_t *buffer);
         void start(DefaultCascadeContextType* typed_ctxt);
         void join();
         void signal_stop();
+    };
+
+    /***
+     * This thread gathers queries for each shard, batch them and emit to the next UDL
+     */
+    class BatchingThread {
+        private:
+            uint64_t my_thread_id;
+            ClustersSearchOCDPO* parent;
+            ServiceClientAPI& capi = ServiceClientAPI::get_service_client();
+            std::thread real_thread;
+            bool running = false;
+
+            std::unordered_map<uint32_t,std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>>> shard_queue; // a queue for each next shard
+            std::condition_variable_any shard_queue_cv;
+            std::mutex shard_queue_mutex;
+
+            void main_loop(DefaultCascadeContextType* typed_ctxt);
+
+        public:
+            BatchingThread(uint64_t thread_id, ClustersSearchOCDPO* parent_udl);
+            void start(DefaultCascadeContextType* typed_ctxt);
+            void join();
+            void signal_stop();
+            void push_results(std::unique_ptr<std::vector<std::shared_ptr<ClusterSearchResult>>> results);
     };
 
     // These two values could be set by config in dfgs.json.tmp file
@@ -106,17 +94,17 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     uint32_t top_k = 4; // number of top K embeddings to search
     int faiss_search_type = 0; // 0: CPU flat search, 1: GPU flat search, 2: GPU IVF search
     int my_id; // the node id of this node; logging purpose
-    uint32_t batch_time_us = 1000; // the time interval to process the batch of queries
-    size_t min_batch_size = 1; // min number queries to process in each batch
-    size_t max_batch_size = 1000; // max number queries to process in each batch, for hnsw search, set it to 1 is optimal
+    uint32_t min_batch_size = 1; // min number of queries to send down the pipeline
+    uint32_t max_batch_size = 100; // max number of queries to send down the pipeline
+    uint32_t batch_time_us = 1000; // the time to wait for the minimum batch size
+    uint32_t max_process_batch_size = 10; // max number of queries to process in each batch
+                                          // for HNSW or Faiss CPU search, set it to a small value (e.g. 1 to 20): the goal is to better distribute the queries across threads
+                                          // for GPU-based search, set it to a big value (e.g. 100s to 1000s): the goal is to better utilize GPU memory and cores
+
     int num_threads = 1; // number of threads to process the cluster search
     uint64_t next_thread = 0;
 
-    int cluster_id = -1; // the cluster that this node handles
-    mutable std::shared_mutex cluster_search_index_mutex;
-    mutable std::condition_variable_any cluster_search_index_cv;
-    // maps from cluster ID -> embeddings of that cluster, 
-    // use pointer to allow multithreading adding queries to different GroupedEmbeddingsForSearch objects
+    int cluster_id = -1;
     std::shared_ptr<GroupedEmbeddingsForSearch> cluster_search_index;    
 
     bool check_and_retrieve_cluster_index(DefaultCascadeContextType* typed_ctxt);
@@ -131,8 +119,8 @@ class ClustersSearchOCDPO: public DefaultOffCriticalDataPathObserver {
     static std::shared_ptr<OffCriticalDataPathObserver> ocdpo_ptr;
 
 public:
-    /*** TODO: have a thread_pool for process cluster search workers */
     std::vector<std::unique_ptr<ClusterSearchWorker>> cluster_search_threads;
+    std::unique_ptr<BatchingThread> batch_thread;
 
     static void initialize() {
         if(!ocdpo_ptr) {
