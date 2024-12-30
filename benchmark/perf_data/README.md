@@ -18,7 +18,7 @@ To use FAISS KNN clustering algorithm, you can simple run
 ``` python format_gist.py --embeddings_loc /path/to/save/embeddings --ncentroids 5 --niter 20```
 
 #### 2.2 Use balanced KNN clustering
-To get balanced knn clustering datasets, first needs to compile and build the gp-ann repository. It could be built either via cmake in that directory or the python file 
+To get balanced knn clustering datasets, first needs to compile and build the gp-ann repository. It could be built either via cmake in that directory (Note make sure to build the executables in folder named ```release_l2```) or the python file 
 ``` python build_balanced_gpann.py ```
 
 To run gp-ann to generate balanced clustering, you can run with -b flag
